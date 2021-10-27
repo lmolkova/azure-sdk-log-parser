@@ -6,7 +6,7 @@ Small tool to parse Azure messaging SDK (for Java) log files and send them to Az
 
 - Maven
 - JDK 11
-- Application Insights resource in portal
+- Application Insights resource
 
 ## Usage
 
