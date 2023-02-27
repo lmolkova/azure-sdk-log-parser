@@ -9,11 +9,11 @@ public class LogParserOptions {
     /**
      * TODO: we can support archived tar.gz, zip. we can support other sources: blob
      */
-    @Parameter(names = {"f", "file"}, description = "Path to log file, log directory, or zip archive to parse.",
+    @Parameter(names = {"-f", "--file"}, description = "Path to log file, log directory, or zip archive to parse.",
             required = true)
     private String fileOrDirectory;
 
-    @Parameter(names = {"l", "layout"}, description = "Log layout, defaults to \"<date> <time> <level> <thread> <class> \". "
+    @Parameter(names = {"-l", "--layout"}, description = "Log layout, defaults to \"<date> <time> <level> <thread> <class> \". "
             + "Message is the last one and not specified in the layout.",
             converter = LayoutConverter.class)
     private Layout layout = Layout.DEFAULT;

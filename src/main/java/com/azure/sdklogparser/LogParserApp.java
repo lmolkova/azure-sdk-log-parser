@@ -3,6 +3,7 @@ package com.azure.sdklogparser;
 import com.azure.sdklogparser.util.ArchiveHelper;
 import com.azure.sdklogparser.util.RunInfo;
 import com.beust.jcommander.JCommander;
+import com.beust.jcommander.ParameterException;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 
@@ -27,8 +28,18 @@ public class LogParserApp {
         final JCommander jCommander = JCommander.newBuilder()
                 .addObject(options)
                 .build();
+        jCommander.setProgramName("log-parser");
 
-        jCommander.parse(args);
+        try {
+            jCommander.parse(args);
+        } catch (ParameterException e) {
+            System.err.println(e.getLocalizedMessage());
+            System.err.println();
+
+            jCommander.usage();
+            System.out.println(LogParserOptions.getExamples());
+            return;
+        }
 
         if (options.isPrintHelp()) {
             jCommander.usage();
