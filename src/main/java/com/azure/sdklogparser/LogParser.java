@@ -2,10 +2,8 @@ package com.azure.sdklogparser;
 
 import com.azure.sdklogparser.util.Layout;
 import com.azure.sdklogparser.util.RunInfo;
-import com.azure.sdklogparser.util.RunInfoTelemetryInitializer;
 import com.microsoft.applicationinsights.TelemetryClient;
-import com.microsoft.applicationinsights.TelemetryConfiguration;
-import com.microsoft.applicationinsights.channel.concrete.inprocess.InProcessTelemetryChannel;
+import com.microsoft.applicationinsights.extensibility.context.CloudContext;
 import com.microsoft.applicationinsights.telemetry.SeverityLevel;
 import com.microsoft.applicationinsights.telemetry.TraceTelemetry;
 import org.slf4j.Logger;
@@ -31,20 +29,15 @@ public class LogParser {
     private final Logger logger;
     private final TelemetryClient telemetryClient;
     private final RunInfo runInfo;
-    ;
 
     public LogParser(String connectionString, RunInfo runInfo) {
-        TelemetryConfiguration config = new TelemetryConfiguration();
-        config.getTelemetryInitializers().add(new RunInfoTelemetryInitializer(runInfo));
+        this.telemetryClient = new TelemetryClient();
+        this.telemetryClient.getContext().setConnectionString(connectionString);
 
-        if (runInfo.isDryRun()) {
-            config.setInstrumentationKey("unused");
-        } else {
-            config.setConnectionString(connectionString);
-            config.setChannel(new InProcessTelemetryChannel(config));
-        }
+        CloudContext cloudContext = this.telemetryClient.getContext().getCloud();
+        cloudContext.setRole(runInfo.getRunName());
+        cloudContext.setRoleInstance(runInfo.getUniqueId());
 
-        this.telemetryClient = new TelemetryClient(config);
         this.logger = LoggerFactory.getLogger(LogParser.class);
         this.runInfo = runInfo;
     }
