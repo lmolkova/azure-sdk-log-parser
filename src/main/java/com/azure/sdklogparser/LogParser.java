@@ -17,22 +17,22 @@ import java.io.InputStreamReader;
 import java.util.regex.Pattern;
 
 public class LogParser {
-    private final static int DRY_RUN_MAX_LINES  = 2;
     private static final String[] DATE_FORMATS = new String[]{
             "^\\d{4}-\\d{2}-\\d{2}.*", // yyyy-MM-dd or yyyy-dd-MM
             "^\\d{4}/\\d{2}/\\d{2}.*", // yyyy/MM/dd or yyyy/dd/MM
             // ...
     };
 
-    private static final Pattern[] SDK_KVP_PATTERNS = new Pattern[] {
-            Pattern.compile("([\\w\\d\\.]+)\\s*\\[([^\\]]+)\\]"),
-            Pattern.compile("([\\w\\d\\.]+)\\s*\\:{1}\\s*\\'([^\\']+)\\'")
+    private static final Pattern[] SDK_KVP_PATTERNS = new Pattern[]{
+            Pattern.compile("([\\w\\d.]+)\\s*\\[([^]]+)]"),
+            Pattern.compile("([\\w\\d.]+)\\s*:\\s*'([^']+)'")
     };
 
     private final Logger logger;
     private final TelemetryClient telemetryClient;
     private final RunInfo runInfo;
-;
+    ;
+
     public LogParser(String connectionString, RunInfo runInfo) {
         TelemetryConfiguration config = new TelemetryConfiguration();
         config.getTelemetryInitializers().add(new RunInfoTelemetryInitializer(runInfo));
@@ -69,7 +69,7 @@ public class LogParser {
 
                 parseLine(prevLine, layout, fileLineNumber);
                 prevLine = line;
-                fileLineNumber ++;
+                fileLineNumber++;
             }
 
             if (prevLine != null) {
@@ -81,7 +81,7 @@ public class LogParser {
     }
 
     private boolean startsWithDate(String line) {
-        for (var format : DATE_FORMATS){
+        for (var format : DATE_FORMATS) {
             if (Pattern.matches(format, line)) {
                 return true;
             }
@@ -144,11 +144,10 @@ public class LogParser {
         return logRecord;
     }
 
-    private String parseSdkMessage(String message, TraceTelemetry logRecord)
-    {
+    private String parseSdkMessage(String message, TraceTelemetry logRecord) {
         boolean[] removeFromMessage = new boolean[message.length()];
 
-        for( var regex : SDK_KVP_PATTERNS) {
+        for (var regex : SDK_KVP_PATTERNS) {
             var matches = regex.matcher(message);
             while (matches.find()) {
                 String key = matches.group(1).trim();
@@ -168,7 +167,7 @@ public class LogParser {
 
         var remainsBuilder = new StringBuilder();
 
-        for (int i = 0; i < message.length(); i ++) {
+        for (int i = 0; i < message.length(); i++) {
             if (!removeFromMessage[i] && (message.charAt(i) != ' ' ||
                     i == 0 ||
                     remainsBuilder.length() == 0 ||
@@ -180,9 +179,8 @@ public class LogParser {
         return remainsBuilder.toString().trim();
     }
 
-    private void setSeverity(String value, TraceTelemetry logRecord){
-        switch (value)
-        {
+    private void setSeverity(String value, TraceTelemetry logRecord) {
+        switch (value) {
             case "INFO":
                 logRecord.setSeverityLevel(SeverityLevel.Information);
                 break;
