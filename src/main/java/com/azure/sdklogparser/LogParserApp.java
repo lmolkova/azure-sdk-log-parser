@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,7 +20,7 @@ import java.util.Collections;
 
 public class LogParserApp {
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
         // -l "<date> <time> <level> [<thread>] <class> - "
         final LogParserOptions options = new LogParserOptions();
 
@@ -58,19 +59,30 @@ public class LogParserApp {
             run.nextFile(file.getAbsolutePath());
             try (var fileReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
                 logParser.parse(fileReader, options.getLayout());
+            } catch (IOException e) {
+                throw new UncheckedIOException("Unable to read file: " + file, e);
             }
         }
 
         run.printRunSummary();
     }
 
-    private static Path getPathAndUnzipIfNeeded(String fileName, boolean unzip) throws IOException {
+    private static Path getPathAndUnzipIfNeeded(String fileName, boolean unzip) {
         Path pathToFile = Paths.get(fileName);
         if (unzip || FilenameUtils.getExtension(fileName).equals("zip")) {
-            pathToFile = Files.createTempDirectory(null);
-            if (!ArchiveHelper.unzip(fileName, pathToFile.toString())) {
-                System.out.println("Error: can't unzip " + fileName);
-                System.exit(1);
+            try {
+                pathToFile = Files.createTempDirectory(null);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Unable to create temporary file directory.", e);
+            }
+
+            try {
+                if (!ArchiveHelper.unzip(fileName, pathToFile.toString())) {
+                    System.out.println("Error: can't unzip " + fileName);
+                    System.exit(1);
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException("Unable to unzip file: " + fileName, e);
             }
         }
 
