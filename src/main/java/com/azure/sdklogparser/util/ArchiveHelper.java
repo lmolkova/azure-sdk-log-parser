@@ -10,26 +10,25 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-
 public class ArchiveHelper {
-    public static boolean unzip(String zipFilePath, String extractDirectory) throws IOException {
-
-        InputStream inputStream = null;
+    public static boolean unzip(String zipFilePath, String extractDirectory) {
+        InputStream inputStream;
         try {
             Path filePath = Paths.get(zipFilePath);
             inputStream = Files.newInputStream(filePath);
             ArchiveStreamFactory archiveStreamFactory = new ArchiveStreamFactory();
             ArchiveInputStream archiveInputStream = archiveStreamFactory.createArchiveInputStream(ArchiveStreamFactory.ZIP, inputStream);
             ArchiveEntry archiveEntry = null;
-            while((archiveEntry = archiveInputStream.getNextEntry()) != null) {
+            while ((archiveEntry = archiveInputStream.getNextEntry()) != null) {
                 Path path = Paths.get(extractDirectory, archiveEntry.getName());
                 File file = path.toFile();
-                if(archiveEntry.isDirectory()) {
-                    if(!file.isDirectory()) {
+                if (archiveEntry.isDirectory()) {
+                    if (!file.isDirectory()) {
                         file.mkdirs();
                     }
                 } else {
@@ -43,8 +42,9 @@ public class ArchiveHelper {
                 }
             }
         } catch (ArchiveException e) {
-            e.printStackTrace();
-            return false;
+            throw new RuntimeException("Unable to extract archive.", e);
+        } catch (IOException e1) {
+            throw new UncheckedIOException("Unable to open file to extract archive.", e1);
         }
 
         return true;
