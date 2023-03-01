@@ -1,19 +1,15 @@
 package com.azure.sdklogparser.util;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.microsoft.applicationinsights.telemetry.Telemetry;
 import com.microsoft.applicationinsights.telemetry.TraceTelemetry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.simple.SimpleLogger;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 public class RunInfo {
     private static final long MAX_DRY_RUN_LINES = 10;
@@ -76,22 +72,6 @@ public class RunInfo {
 
         linesRead ++;
         linesReadInFile ++;
-
-        if (dryRun || logger.isDebugEnabled()) {
-                // add debug info
-                Map<String, String> output = new TreeMap<>(logRecord.getProperties());
-                output.put("level", ((TraceTelemetry) logRecord).getSeverityLevel().name());
-                output.put("message", ((TraceTelemetry) logRecord).getMessage());
-            try {
-                if (dryRun) {
-                    System.out.println(prettyPrinter.writeValueAsString(output));
-                } else if (logger.isDebugEnabled()) {
-                    logger.debug(prettyPrinter.writeValueAsString(output));
-                }
-            } catch (JsonProcessingException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
     public void printRunSummary() {
