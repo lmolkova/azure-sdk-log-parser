@@ -1,20 +1,13 @@
 package com.azure.sdklogparser.util;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.microsoft.applicationinsights.telemetry.Telemetry;
 import com.microsoft.applicationinsights.telemetry.TraceTelemetry;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 public class RunInfo {
-    private static final long MAX_DRY_RUN_LINES = 10;
-    private final Logger logger = LoggerFactory.getLogger(RunInfo.class);
-    private final ObjectMapper prettyPrinter = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private final String runName;
     private final String uniqueId;
     private final boolean dryRun;
@@ -25,7 +18,6 @@ public class RunInfo {
     private final List<String> files = new ArrayList<>();
     private long linesRead = 0;
     private long linesReadInFile = 0;
-
 
     public RunInfo(String runName, boolean dryRun, long maxLines) {
         this.runName = runName;

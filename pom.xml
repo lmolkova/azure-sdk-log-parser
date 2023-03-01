@@ -38,10 +38,12 @@
             <version>1.21</version>
         </dependency>
 
+        <!-- Have to use 2.x.x because it has implementation that was moved in 3.x to upload traces to Application
+            Insights. It was moved into applicationinsights-agent.jar. -->
         <dependency>
             <groupId>com.microsoft.azure</groupId>
             <artifactId>applicationinsights-core</artifactId>
-            <version>3.4.10</version>
+            <version>2.6.3</version>
         </dependency>
 
         <dependency>
