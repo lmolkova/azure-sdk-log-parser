@@ -1,7 +1,13 @@
 package com.azure.sdklogparser;
 
 import com.azure.sdklogparser.util.Layout;
+import com.azure.sdklogparser.util.PrintTelemetryClient;
 import com.azure.sdklogparser.util.RunInfo;
+import com.azure.sdklogparser.util.Token;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.applicationinsights.TelemetryClient;
 import com.microsoft.applicationinsights.extensibility.context.CloudContext;
 import com.microsoft.applicationinsights.telemetry.SeverityLevel;
@@ -12,9 +18,15 @@ import org.slf4j.LoggerFactory;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.HashMap;
 import java.util.regex.Pattern;
 
 public class LogParser {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final TypeReference<HashMap<String, Object>> TYPE_REFERENCE = new TypeReference<>() {
+    };
+    private static final String NULL = "null";
+
     private static final String[] DATE_FORMATS = new String[]{
             "^\\d{4}-\\d{2}-\\d{2}.*", // yyyy-MM-dd or yyyy-dd-MM
             "^\\d{4}/\\d{2}/\\d{2}.*", // yyyy/MM/dd or yyyy/dd/MM
@@ -31,8 +43,13 @@ public class LogParser {
     private final RunInfo runInfo;
 
     public LogParser(String connectionString, RunInfo runInfo) {
-        this.telemetryClient = new TelemetryClient();
-        this.telemetryClient.getContext().setConnectionString(connectionString);
+
+        if (runInfo.isDryRun()) {
+            this.telemetryClient = new PrintTelemetryClient();
+        } else {
+            this.telemetryClient = new TelemetryClient();
+            this.telemetryClient.getContext().setConnectionString(connectionString);
+        }
 
         CloudContext cloudContext = this.telemetryClient.getContext().getCloud();
         cloudContext.setRole(runInfo.getRunName());
@@ -60,16 +77,28 @@ public class LogParser {
                     line = br.readLine();
                 }
 
-                parseLine(prevLine, layout, fileLineNumber);
+                TraceTelemetry telemetry = parseLine(prevLine, layout, fileLineNumber);
+                runInfo.nextRecord(telemetry);
+
                 prevLine = line;
                 fileLineNumber++;
             }
 
             if (prevLine != null) {
-                parseLine(prevLine, layout, fileLineNumber);
+                TraceTelemetry t = parseLine(prevLine, layout, fileLineNumber);
+                runInfo.nextRecord(t);
             }
         } finally {
             telemetryClient.flush();
+        }
+    }
+
+    private void parse(InputStreamReader reader, Layout layout, boolean isJson) throws IOException {
+        if (isJson) {
+            final Log log = OBJECT_MAPPER.readValue(reader, Log.class);
+            System.out.println("foo");
+        } else {
+            parse(reader, layout);
         }
     }
 
@@ -84,12 +113,6 @@ public class LogParser {
     }
 
     private TraceTelemetry parseLine(String line, Layout layout, long fileLineNumber) {
-        // We need a marker for Azure SDK message
-        /*if (!line.contains("connectionId") && !line.contains("linkName")) {
-            // not AMQP SDK log
-            return null;
-        }*/
-
         if (line.contains("  ")) {
             line = line.replaceAll("\\s+", " ");
         }
@@ -99,7 +122,7 @@ public class LogParser {
         int ind = 0;
         var it = layout.getIterator();
         while (it.hasNext()) {
-            Layout.Token next = it.next();
+            Token next = it.next();
 
             int sepInd = line.indexOf(next.getSeparator(), ind);
             if (sepInd < 0) {
@@ -124,16 +147,33 @@ public class LogParser {
 
         String sdkMessage = line.substring(ind);
         String sdkMessageNoContext = parseSdkMessage(sdkMessage, logRecord);
+        logRecord.setMessage(sdkMessageNoContext);
+
         if (runInfo.isDryRun() || logger.isDebugEnabled()) {
             logRecord.getProperties().put("original-message", line);
         }
 
-        logRecord.setMessage(String.format("Line  %d: %s", fileLineNumber, sdkMessageNoContext));
-
         // LogAnalytics/AppInsights don't like timestamps in the past, so we'll put them on custom dimension
         logRecord.getProperties().put("timestamp", dateStr + " " + timeStr);
 
-        telemetryClient.track(logRecord);
+        logRecord.getProperties().put("line", String.valueOf(fileLineNumber));
+
+        try {
+            final HashMap<String, Object> properties = OBJECT_MAPPER.readValue(sdkMessageNoContext, TYPE_REFERENCE);
+
+            properties.forEach((key, value) -> {
+                if (value == null) {
+                    logRecord.getProperties().put(key, NULL);
+                } else {
+                    logRecord.getProperties().put(key, value.toString());
+                }
+            });
+        } catch (JsonProcessingException e) {
+            System.err.println("Exception parsing properties. Error: " + e);
+        } finally {
+            telemetryClient.trackTrace(logRecord);
+        }
+
         return logRecord;
     }
 
@@ -172,7 +212,7 @@ public class LogParser {
         return remainsBuilder.toString().trim();
     }
 
-    private void setSeverity(String value, TraceTelemetry logRecord) {
+    private static void setSeverity(String value, TraceTelemetry logRecord) {
         switch (value) {
             case "INFO":
                 logRecord.setSeverityLevel(SeverityLevel.Information);
@@ -187,5 +227,9 @@ public class LogParser {
                 logRecord.setSeverityLevel(SeverityLevel.Verbose);
                 break;
         }
+    }
+
+    private static final class Log {
+        JsonNode[] lines;
     }
 }
