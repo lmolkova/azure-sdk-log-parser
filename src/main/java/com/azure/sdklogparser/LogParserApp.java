@@ -6,6 +6,9 @@ import com.azure.sdklogparser.util.RunInfo;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterException;
 import com.microsoft.applicationinsights.TelemetryClient;
+import com.microsoft.applicationinsights.TelemetryConfiguration;
+import com.microsoft.applicationinsights.channel.concrete.inprocess.InProcessTelemetryChannel;
+import com.microsoft.applicationinsights.extensibility.TelemetryInitializer;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 
@@ -18,17 +21,21 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Objects;
 
 public class LogParserApp {
 
     public static void main(String[] args) {
         // -l "<date> <time> <level> [<thread>] <class> - "
-        final LogParserOptions options = new LogParserOptions();
+        final PlaintextLogParserOptions plainTextCommand = new PlaintextLogParserOptions();
+        final JsonLogParserOptions jsonCommand = new JsonLogParserOptions();
 
         final JCommander jCommander = JCommander.newBuilder()
-                .addObject(options)
+                .addCommand(plainTextCommand.getCommandName(), plainTextCommand)
+                .addCommand(jsonCommand.getCommandName(), jsonCommand)
                 .build();
         jCommander.setProgramName("log-parser");
 
@@ -38,18 +45,52 @@ public class LogParserApp {
             System.err.println(e.getLocalizedMessage());
             System.err.println();
 
-            jCommander.usage();
-            System.out.println(LogParserOptions.getExamples());
+            printHelp(jCommander, plainTextCommand, jsonCommand);
             return;
         }
 
-        if (options.isPrintHelp()) {
-            jCommander.usage();
-            System.out.println(LogParserOptions.getExamples());
+        final String command = jCommander.getParsedCommand();
+
+        final LogParserOptions optionsToUse;
+        if (plainTextCommand.getCommandName().equalsIgnoreCase(command)) {
+            if (plainTextCommand.isPrintHelp()) {
+                printHelp(jCommander, plainTextCommand, jsonCommand);
+                return;
+            }
+
+            optionsToUse = plainTextCommand;
+        } else if (jsonCommand.getCommandName().equalsIgnoreCase(command)) {
+            if (jsonCommand.isPrintHelp()) {
+                printHelp(jCommander, plainTextCommand, jsonCommand);
+                return;
+            }
+
+            optionsToUse = jsonCommand;
+        } else {
+            System.out.println("Arguments did not match any command sets.");
+            printHelp(jCommander, plainTextCommand, jsonCommand);
             return;
         }
 
-        final String fileName = options.getFileOrDirectory();
+        final RunInfo runInformation = getRunInformation(optionsToUse);
+        final TelemetryClient telemetryClient = getTelemetryClient(optionsToUse, runInformation);
+        final Path pathToFile = getPathAndUnzipIfNeeded(optionsToUse.getFileOrDirectory(), optionsToUse.unzipFile());
+
+        final LogParser logParser = new LogParser(telemetryClient, runInformation);
+
+        for (var file : listFiles(pathToFile)) {
+            runInformation.nextFile(file.getAbsolutePath());
+            try (var fileReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
+                logParser.parse(fileReader, plainTextCommand.getLayout());
+            } catch (IOException e) {
+                throw new UncheckedIOException("Unable to read file: " + file, e);
+            }
+        }
+
+        runInformation.printRunSummary();
+    }
+
+    private static TelemetryClient getTelemetryClient(LogParserOptions options, RunInfo runInfo) {
         final String connectionString;
         if (options.getConnectionString() != null) {
             connectionString = options.getConnectionString();
@@ -59,33 +100,52 @@ public class LogParserApp {
             connectionString = null;
         }
 
+        final TelemetryClient telemetryClient;
+        if (options.isDryRun() && connectionString != null) {
+            telemetryClient = new PrintTelemetryClient();
+        } else {
+            TelemetryConfiguration config = new TelemetryConfiguration();
+            TelemetryInitializer initializer = telemetry -> {
+                telemetry.getContext().getCloud().setRole(runInfo.getRunName());
+                telemetry.getContext().getCloud().setRoleInstance(runInfo.getUniqueId());
+            };
+
+            config.getTelemetryInitializers().add(initializer);
+            config.setConnectionString(Objects.requireNonNull(connectionString));
+            config.setChannel(new InProcessTelemetryChannel(config));
+
+            telemetryClient = new TelemetryClient(config);
+        }
+
+        return telemetryClient;
+    }
+
+    private static RunInfo getRunInformation(LogParserOptions options) {
+        final String fileName = options.getFileOrDirectory();
         final String runIdPrefix = options.getRunId() != null
                 ? options.getRunId()
                 : Paths.get(fileName).getFileName().toString();
+        final long numberOfLinesToProcess = options.isDryRun() ? options.getMaxLinesPerFile() : Long.MAX_VALUE;
 
-        final Path pathToFile = getPathAndUnzipIfNeeded(fileName, options.unzipFile());
-        final RunInfo run = new RunInfo(runIdPrefix, options.isDryRun(), options.getMaxLinesPerFile());
+        return new RunInfo(runIdPrefix, options.isDryRun(), numberOfLinesToProcess);
+    }
 
-        final TelemetryClient telemetryClient;
-        if (run.isDryRun()) {
-            telemetryClient = new PrintTelemetryClient();
-        } else {
-            telemetryClient = new TelemetryClient();
-            telemetryClient.getContext().setConnectionString(connectionString);
-        }
+    private static void process(RunInfo runInfo, JsonLogParserOptions options) {
 
-        var logParser = new LogParser(telemetryClient, run);
+    }
 
-        for (var file : listFiles(pathToFile)) {
-            run.nextFile(file.getAbsolutePath());
-            try (var fileReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
-                logParser.parse(fileReader, options.getLayout());
-            } catch (IOException e) {
-                throw new UncheckedIOException("Unable to read file: " + file, e);
-            }
-        }
+    private static void process(RunInfo runInfo, PlaintextLogParserOptions options) {
 
-        run.printRunSummary();
+    }
+
+    private static void printHelp(JCommander jCommander, LogParserOptions... command) {
+        jCommander.usage();
+        System.out.println("Examples\n\n");
+
+        Arrays.stream(command).forEach(option -> {
+            System.out.println(option.getExamples());
+            System.out.println();
+        });
     }
 
     private static Path getPathAndUnzipIfNeeded(String fileName, boolean unzip) {

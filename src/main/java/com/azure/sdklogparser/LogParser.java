@@ -30,15 +30,12 @@ public class LogParser {
     private static final Pattern MULTIPLE_WHITESPACE = Pattern.compile("[ ]{2,}");
     private static final String NULL = "null";
 
+    private static final String AZ_SDK_MESSAGE_KEY = "az.sdk.message";
+
     private static final String[] DATE_FORMATS = new String[]{
             "^\\d{4}-\\d{2}-\\d{2}.*", // yyyy-MM-dd or yyyy-dd-MM
             "^\\d{4}/\\d{2}/\\d{2}.*", // yyyy/MM/dd or yyyy/dd/MM
             // ...
-    };
-
-    private static final Pattern[] SDK_KVP_PATTERNS = new Pattern[]{
-            Pattern.compile("([\\w\\d.]+)\\s*\\[([^]]+)]"),
-            Pattern.compile("([\\w\\d.]+)\\s*:\\s*'([^']+)'")
     };
 
     private final TelemetryClient telemetryClient;
@@ -106,7 +103,7 @@ public class LogParser {
         return false;
     }
 
-    private TraceTelemetry parseLine(String line, Layout layout, long fileLineNumber) {
+    private TraceTelemetry parseLine(String line, Layout layout, long fileLineNumber) throws JsonProcessingException {
         final String replaced = MULTIPLE_WHITESPACE.matcher(line).replaceAll(" ");
         final TraceTelemetry telemetry = new TraceTelemetry();
 
@@ -141,9 +138,8 @@ public class LogParser {
             ind = sepInd + next.getSeparator().length();
         }
 
-        final String sdkMessageNoContext = parseSdkMessage(line.substring(ind), telemetry);
-
-        telemetry.setMessage(sdkMessageNoContext);
+        // Assuming SDK message is last index.
+        final String sdkMessage = line.substring(ind);
 
         if (runInfo.isDryRun() || LOGGER.isDebugEnabled()) {
             telemetry.getProperties().put("original-message", line);
@@ -156,15 +152,18 @@ public class LogParser {
         customProperties.put("line", String.valueOf(fileLineNumber));
 
         try {
-            final HashMap<String, Object> properties = OBJECT_MAPPER.readValue(sdkMessageNoContext, TYPE_REFERENCE);
-
+            final HashMap<String, Object> properties = parseSdkMessage(sdkMessage);
             properties.forEach((key, value) -> {
                 final String finalValue = value == null ? NULL : value.toString();
 
                 customProperties.put(key, finalValue);
             });
+
+            final Object value = properties.getOrDefault(AZ_SDK_MESSAGE_KEY, sdkMessage);
+            telemetry.setMessage(value != null ? value.toString() : sdkMessage);
         } catch (JsonProcessingException e) {
-            LOGGER.error("Exception parsing SDK message. message[{}]", sdkMessageNoContext, e);
+            LOGGER.info("Could not parse SDK message as JSON object. message:{}", sdkMessage, e);
+            telemetry.setMessage(sdkMessage);
         } finally {
             telemetryClient.trackTrace(telemetry);
         }
@@ -172,39 +171,21 @@ public class LogParser {
         return telemetry;
     }
 
-    private String parseSdkMessage(String message, TraceTelemetry telemetry) {
-        boolean[] removeFromMessage = new boolean[message.length()];
-
-        for (var regex : SDK_KVP_PATTERNS) {
-            var matches = regex.matcher(message);
-            while (matches.find()) {
-                String key = matches.group(1).trim();
-                String value = matches.group(2).trim();
-                if (key.equals("linkName")) {
-                    int underscoreInd = value.indexOf('_');
-                    if (underscoreInd > 0) {
-                        telemetry.getProperties().putIfAbsent("partitionId", value.substring(0, underscoreInd));
-                    }
-                }
-                telemetry.getProperties().putIfAbsent(key, value);
-                for (int i = matches.start(); i < matches.end(); i++) {
-                    removeFromMessage[i] = true;
-                }
+    private HashMap<String, Object> parseSdkMessage(String message)
+            throws JsonProcessingException {
+        try {
+            return OBJECT_MAPPER.readValue(message, TYPE_REFERENCE);
+        } catch (JsonProcessingException e) {
+            // Possible that we missed some trailing characters when extracting the SDK message.
+            int firstCurlyBrace = message.indexOf('{');
+            if (firstCurlyBrace == -1) {
+                throw e;
             }
+
+            final String parsed = message.substring(firstCurlyBrace);
+
+            return OBJECT_MAPPER.readValue(parsed, TYPE_REFERENCE);
         }
-
-        var remainsBuilder = new StringBuilder();
-
-        for (int i = 0; i < message.length(); i++) {
-            if (!removeFromMessage[i] && (message.charAt(i) != ' ' ||
-                    i == 0 ||
-                    remainsBuilder.length() == 0 ||
-                    (message.charAt(i) == ' ' && remainsBuilder.charAt(remainsBuilder.length() - 1) != ' '))) {
-                remainsBuilder.append(message.charAt(i));
-            }
-        }
-
-        return remainsBuilder.toString().trim();
     }
 
     private static SeverityLevel getSeverity(String value) {
