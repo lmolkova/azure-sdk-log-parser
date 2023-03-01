@@ -1,9 +1,11 @@
 package com.azure.sdklogparser;
 
 import com.azure.sdklogparser.util.ArchiveHelper;
+import com.azure.sdklogparser.util.PrintTelemetryClient;
 import com.azure.sdklogparser.util.RunInfo;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterException;
+import com.microsoft.applicationinsights.TelemetryClient;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 
@@ -62,9 +64,18 @@ public class LogParserApp {
                 : Paths.get(fileName).getFileName().toString();
 
         final Path pathToFile = getPathAndUnzipIfNeeded(fileName, options.unzipFile());
+        final RunInfo run = new RunInfo(runIdPrefix, options.isDryRun(), options.getMaxLinesPerFile());
 
-        RunInfo run = new RunInfo(runIdPrefix, options.isDryRun(), options.getMaxLinesPerFile());
-        var logParser = new LogParser(connectionString, run);
+        final TelemetryClient telemetryClient;
+        if (run.isDryRun()) {
+            telemetryClient = new PrintTelemetryClient();
+        } else {
+            telemetryClient = new TelemetryClient();
+            telemetryClient.getContext().setConnectionString(connectionString);
+        }
+
+        var logParser = new LogParser(telemetryClient, run);
+
         for (var file : listFiles(pathToFile)) {
             run.nextFile(file.getAbsolutePath());
             try (var fileReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {

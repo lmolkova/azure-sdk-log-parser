@@ -2,10 +2,12 @@ package com.azure.sdklogparser.util;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 public class Token {
     private static final Map<String, TokenType> TOKEN_TYPE_MAP;
+
     private final String name;
     private final String separator;
     private final TokenType tokenType;
@@ -19,7 +21,9 @@ public class Token {
     public Token(String name, String separator) {
         this.name = name;
         this.separator = separator;
-        this.tokenType = TOKEN_TYPE_MAP.getOrDefault(name, TokenType.DEFAULT);
+
+        final String toLower = name.toLowerCase(Locale.ROOT);
+        this.tokenType = TOKEN_TYPE_MAP.getOrDefault(toLower, TokenType.DEFAULT);
     }
 
     public String getName() {

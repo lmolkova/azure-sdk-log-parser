@@ -1,7 +1,6 @@
 package com.azure.sdklogparser;
 
 import com.azure.sdklogparser.util.Layout;
-import com.azure.sdklogparser.util.PrintTelemetryClient;
 import com.azure.sdklogparser.util.RunInfo;
 import com.azure.sdklogparser.util.Token;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -19,12 +18,16 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 public class LogParser {
+    private static final Logger LOGGER = LoggerFactory.getLogger(LogParser.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final TypeReference<HashMap<String, Object>> TYPE_REFERENCE = new TypeReference<>() {
     };
+    private static final Pattern MULTIPLE_WHITESPACE = Pattern.compile("[ ]{2,}");
     private static final String NULL = "null";
 
     private static final String[] DATE_FORMATS = new String[]{
@@ -38,24 +41,15 @@ public class LogParser {
             Pattern.compile("([\\w\\d.]+)\\s*:\\s*'([^']+)'")
     };
 
-    private final Logger logger;
     private final TelemetryClient telemetryClient;
     private final RunInfo runInfo;
 
-    public LogParser(String connectionString, RunInfo runInfo) {
+    public LogParser(TelemetryClient telemetryClient, RunInfo runInfo) {
+        this.telemetryClient = telemetryClient;
 
-        if (runInfo.isDryRun()) {
-            this.telemetryClient = new PrintTelemetryClient();
-        } else {
-            this.telemetryClient = new TelemetryClient();
-            this.telemetryClient.getContext().setConnectionString(connectionString);
-        }
-
-        CloudContext cloudContext = this.telemetryClient.getContext().getCloud();
+        final CloudContext cloudContext = telemetryClient.getContext().getCloud();
         cloudContext.setRole(runInfo.getRunName());
         cloudContext.setRoleInstance(runInfo.getUniqueId());
-
-        this.logger = LoggerFactory.getLogger(LogParser.class);
         this.runInfo = runInfo;
     }
 
@@ -65,7 +59,7 @@ public class LogParser {
             String prevLine = br.readLine();
             fileLineNumber++;
             if (prevLine == null) {
-                logger.error("File is empty.");
+                LOGGER.error("File is empty.");
                 return;
             }
 
@@ -113,71 +107,72 @@ public class LogParser {
     }
 
     private TraceTelemetry parseLine(String line, Layout layout, long fileLineNumber) {
-        if (line.contains("  ")) {
-            line = line.replaceAll("\\s+", " ");
-        }
-        var logRecord = new TraceTelemetry();
+        final String replaced = MULTIPLE_WHITESPACE.matcher(line).replaceAll(" ");
+        final TraceTelemetry telemetry = new TraceTelemetry();
+
         String dateStr = null;
         String timeStr = null;
         int ind = 0;
-        var it = layout.getIterator();
-        while (it.hasNext()) {
-            Token next = it.next();
 
-            int sepInd = line.indexOf(next.getSeparator(), ind);
+        final Iterator<Token> it = layout.getIterator();
+        while (it.hasNext()) {
+            final Token next = it.next();
+
+            final int sepInd = replaced.indexOf(next.getSeparator(), ind);
             if (sepInd < 0) {
-                logger.error("LINE {}: can't find '{}' in '{}'", fileLineNumber, next.getName(), line);
+                LOGGER.error("LINE {}: can't find '{}' in '{}'", fileLineNumber, next.getName(), replaced);
                 return null;
             }
 
-            String key = next.getName().trim();
-            String value = line.substring(ind, sepInd).trim();
+            final String key = next.getName().trim();
+            final String value = replaced.substring(ind, sepInd).trim();
 
             if (key.equals("level")) {
-                setSeverity(value, logRecord);
+                final SeverityLevel severityLevel = getSeverity(value);
+                telemetry.setSeverityLevel(severityLevel);
             } else if (key.equals("date")) {
                 dateStr = value;
             } else if (key.equals("time")) {
                 timeStr = value;
             } else {
-                logRecord.getProperties().putIfAbsent(key, value);
+                telemetry.getProperties().putIfAbsent(key, value);
             }
+
             ind = sepInd + next.getSeparator().length();
         }
 
-        String sdkMessage = line.substring(ind);
-        String sdkMessageNoContext = parseSdkMessage(sdkMessage, logRecord);
-        logRecord.setMessage(sdkMessageNoContext);
+        final String sdkMessageNoContext = parseSdkMessage(line.substring(ind), telemetry);
 
-        if (runInfo.isDryRun() || logger.isDebugEnabled()) {
-            logRecord.getProperties().put("original-message", line);
+        telemetry.setMessage(sdkMessageNoContext);
+
+        if (runInfo.isDryRun() || LOGGER.isDebugEnabled()) {
+            telemetry.getProperties().put("original-message", line);
         }
 
         // LogAnalytics/AppInsights don't like timestamps in the past, so we'll put them on custom dimension
-        logRecord.getProperties().put("timestamp", dateStr + " " + timeStr);
+        final Map<String, String> customProperties = telemetry.getProperties();
 
-        logRecord.getProperties().put("line", String.valueOf(fileLineNumber));
+        customProperties.put("timestamp", dateStr + " " + timeStr);
+        customProperties.put("line", String.valueOf(fileLineNumber));
 
         try {
             final HashMap<String, Object> properties = OBJECT_MAPPER.readValue(sdkMessageNoContext, TYPE_REFERENCE);
 
             properties.forEach((key, value) -> {
-                if (value == null) {
-                    logRecord.getProperties().put(key, NULL);
-                } else {
-                    logRecord.getProperties().put(key, value.toString());
-                }
+                final String finalValue = value == null ? NULL : value.toString();
+
+                customProperties.put(key, finalValue);
             });
         } catch (JsonProcessingException e) {
-            System.err.println("Exception parsing properties. Error: " + e);
+            LOGGER.error("Exception parsing SDK message. message[{}]", sdkMessageNoContext, e);
         } finally {
-            telemetryClient.trackTrace(logRecord);
+            telemetryClient.trackTrace(telemetry);
         }
 
-        return logRecord;
+        return telemetry;
     }
 
-    private String parseSdkMessage(String message, TraceTelemetry logRecord) {
+    private String parseSdkMessage(String message, TraceTelemetry telemetry) {
         boolean[] removeFromMessage = new boolean[message.length()];
 
         for (var regex : SDK_KVP_PATTERNS) {
@@ -188,10 +183,10 @@ public class LogParser {
                 if (key.equals("linkName")) {
                     int underscoreInd = value.indexOf('_');
                     if (underscoreInd > 0) {
-                        logRecord.getProperties().putIfAbsent("partitionId", value.substring(0, underscoreInd));
+                        telemetry.getProperties().putIfAbsent("partitionId", value.substring(0, underscoreInd));
                     }
                 }
-                logRecord.getProperties().putIfAbsent(key, value);
+                telemetry.getProperties().putIfAbsent(key, value);
                 for (int i = matches.start(); i < matches.end(); i++) {
                     removeFromMessage[i] = true;
                 }
@@ -212,20 +207,16 @@ public class LogParser {
         return remainsBuilder.toString().trim();
     }
 
-    private static void setSeverity(String value, TraceTelemetry logRecord) {
+    private static SeverityLevel getSeverity(String value) {
         switch (value) {
             case "INFO":
-                logRecord.setSeverityLevel(SeverityLevel.Information);
-                break;
+                return SeverityLevel.Information;
             case "WARN":
-                logRecord.setSeverityLevel(SeverityLevel.Warning);
-                break;
+                return SeverityLevel.Warning;
             case "ERROR":
-                logRecord.setSeverityLevel(SeverityLevel.Error);
-                break;
+                return SeverityLevel.Error;
             default:
-                logRecord.setSeverityLevel(SeverityLevel.Verbose);
-                break;
+                return SeverityLevel.Verbose;
         }
     }
 
