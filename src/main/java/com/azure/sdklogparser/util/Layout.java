@@ -4,27 +4,12 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class Layout {
-    public static class Token {
-        private final String name;
-        private final String separator;
-
-        public Token(String name, String separator) {
-            this.name = name;
-            this.separator = separator;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public String getSeparator() {
-            return separator;
-        }
-    }
 
     public static final Layout DEFAULT = Layout.fromString("<date> <time> <level> <class> <thread> ");
+
     public static Layout fromString(String layoutStr) {
         layoutStr = layoutStr.replaceAll("\\s+", " ");
         var regex = Pattern.compile("<([\\w]+)>([^<]*)");
@@ -39,11 +24,20 @@ public class Layout {
     }
 
     private final List<Token> tokens;
+    private final String display;
+
     private Layout(List<Token> tokens) {
         this.tokens = tokens;
+
+        this.display = tokens.stream().map(t -> "<" + t.getName() + ">" + t.getSeparator()).collect(Collectors.joining(""));
     }
 
     public Iterator<Token> getIterator() {
         return tokens.iterator();
+    }
+
+    @Override
+    public String toString() {
+        return display;
     }
 }
