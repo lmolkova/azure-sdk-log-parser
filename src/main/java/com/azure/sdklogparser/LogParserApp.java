@@ -65,7 +65,6 @@ public class LogParserApp {
 
         RunInfo run = new RunInfo(runIdPrefix, options.isDryRun(), options.getMaxLinesPerFile());
         var logParser = new LogParser(connectionString, run);
-
         for (var file : listFiles(pathToFile)) {
             run.nextFile(file.getAbsolutePath());
             try (var fileReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
@@ -87,13 +86,9 @@ public class LogParserApp {
                 throw new UncheckedIOException("Unable to create temporary file directory.", e);
             }
 
-            try {
-                if (!ArchiveHelper.unzip(fileName, pathToFile.toString())) {
-                    System.out.println("Error: can't unzip " + fileName);
-                    System.exit(1);
-                }
-            } catch (IOException e) {
-                throw new UncheckedIOException("Unable to unzip file: " + fileName, e);
+            if (!ArchiveHelper.unzip(fileName, pathToFile.toString())) {
+                System.out.println("Error: can't unzip " + fileName);
+                System.exit(1);
             }
         }
 
