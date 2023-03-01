@@ -53,23 +53,30 @@ public class RunInfo {
             return;
         }
 
-        var timestamp = logRecord.getProperties().get("timestamp");
-        if (timestamp.compareTo(minTimestamp) < 0)  {
-            minTimestamp = timestamp;
+        var timestamp = logRecord.getProperties().get(TokenType.TIMESTAMP.getValue());
+        if (timestamp != null) {
+            if (timestamp.compareTo(minTimestamp) < 0) {
+                minTimestamp = timestamp;
+            }
+
+            if (timestamp.compareTo(maxTimestamp) > 0) {
+                maxTimestamp = timestamp;
+            }
         }
 
-        if (timestamp.compareTo(maxTimestamp) > 0) {
-            maxTimestamp = timestamp;
-        }
-
-        linesRead ++;
-        linesReadInFile ++;
+        linesRead++;
+        linesReadInFile++;
     }
 
     public void printRunSummary() {
-        System.out.printf("----------------------\nParsed %d log records, min timestamp: '%s', max timestamp: %s\n", linesRead, minTimestamp, maxTimestamp);
-        System.out.printf("Query all logs:\n" +
-                "\ttraces | where cloud_RoleInstance  == \"%s\" and cloud_RoleName == \"%s\"\n", runName, uniqueId);
+        System.out.printf("----------------------\nParsed %d log records, min timestamp: '%s', max timestamp: %s%n",
+                linesRead, minTimestamp, maxTimestamp);
+
+        System.out.printf("Query all Azure SDK logs and expand properties:\n" +
+                "\ttraces | where cloud_RoleInstance  == \"%s\" and cloud_RoleName == \"%s\"%n"
+                + "| where isnotnull(customDimensions[\"az.sdk.message\"])%n"
+                + "| evaluate bag_unpack(customDimensions)\n"
+                + "| sort by tolong(\"line\"), tostring(\"connectionId\") asc\n", uniqueId, runName);
 
     }
 }

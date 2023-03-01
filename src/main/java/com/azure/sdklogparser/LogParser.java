@@ -3,9 +3,10 @@ package com.azure.sdklogparser;
 import com.azure.sdklogparser.util.Layout;
 import com.azure.sdklogparser.util.RunInfo;
 import com.azure.sdklogparser.util.Token;
+import com.azure.sdklogparser.util.TokenType;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.applicationinsights.TelemetryClient;
 import com.microsoft.applicationinsights.extensibility.context.CloudContext;
@@ -27,22 +28,21 @@ public class LogParser {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final TypeReference<HashMap<String, Object>> TYPE_REFERENCE = new TypeReference<>() {
     };
-    private static final Pattern MULTIPLE_WHITESPACE = Pattern.compile("[ ]{2,}");
+    private static final Pattern MULTIPLE_WHITESPACE_PATTERN = Pattern.compile("[ ]{2,}");
+    /**
+     * Default value if the value for a key is null (i.e. errorDescription).
+     */
     private static final String NULL = "null";
 
     private static final String AZ_SDK_MESSAGE_KEY = "az.sdk.message";
 
-    private static final String[] DATE_FORMATS = new String[]{
-            "^\\d{4}-\\d{2}-\\d{2}.*", // yyyy-MM-dd or yyyy-dd-MM
-            "^\\d{4}/\\d{2}/\\d{2}.*", // yyyy/MM/dd or yyyy/dd/MM
-            // ...
-    };
-
     private final TelemetryClient telemetryClient;
+    private final JsonLogParserOptions jsonLogParserOptions;
     private final RunInfo runInfo;
 
-    public LogParser(TelemetryClient telemetryClient, RunInfo runInfo) {
+    public LogParser(TelemetryClient telemetryClient, RunInfo runInfo, JsonLogParserOptions jsonLogParserOptions) {
         this.telemetryClient = telemetryClient;
+        this.jsonLogParserOptions = jsonLogParserOptions;
 
         final CloudContext cloudContext = telemetryClient.getContext().getCloud();
         cloudContext.setRole(runInfo.getRunName());
@@ -50,61 +50,80 @@ public class LogParser {
         this.runInfo = runInfo;
     }
 
-    public void parse(InputStreamReader text, Layout layout) throws IOException {
+    public void parse(InputStreamReader text, Layout layout, boolean isJson) throws IOException {
         long fileLineNumber = 0;
         try (BufferedReader br = new BufferedReader(text)) {
             String prevLine = br.readLine();
+            String line;
             fileLineNumber++;
             if (prevLine == null) {
                 LOGGER.error("File is empty.");
                 return;
             }
 
-            String line;
             while (runInfo.shouldKeepGoing() && (line = br.readLine()) != null) {
-                // check if next line starts with date (otherwise append to current)
-                while (line != null && !startsWithDate(line)) {
-                    prevLine += line;
-                    line = br.readLine();
-                }
-
-                TraceTelemetry telemetry = parseLine(prevLine, layout, fileLineNumber);
-                runInfo.nextRecord(telemetry);
-
-                prevLine = line;
+                processLine(isJson, line, fileLineNumber, layout);
                 fileLineNumber++;
-            }
-
-            if (prevLine != null) {
-                TraceTelemetry t = parseLine(prevLine, layout, fileLineNumber);
-                runInfo.nextRecord(t);
             }
         } finally {
             telemetryClient.flush();
         }
     }
 
-    private void parse(InputStreamReader reader, Layout layout, boolean isJson) throws IOException {
-        if (isJson) {
-            final Log log = OBJECT_MAPPER.readValue(reader, Log.class);
-            System.out.println("foo");
-        } else {
-            parse(reader, layout);
+    private void processLine(boolean isJson, String prevLine, long fileLineNumber, Layout layout) {
+        TraceTelemetry telemetry = null;
+        try {
+            if (isJson) {
+                telemetry = parseLine(prevLine, fileLineNumber, jsonLogParserOptions);
+            } else {
+                telemetry = parseLine(prevLine, fileLineNumber, layout);
+            }
+        } finally {
+            if (telemetry != null) {
+                telemetryClient.trackTrace(telemetry);
+                runInfo.nextRecord(telemetry);
+            }
         }
     }
 
-    private boolean startsWithDate(String line) {
-        for (var format : DATE_FORMATS) {
-            if (Pattern.matches(format, line)) {
-                return true;
+    private TraceTelemetry parseLine(String line, long fileLineNumber, JsonLogParserOptions options) {
+        final TraceTelemetry telemetry = new TraceTelemetry();
+        telemetry.getProperties().put(TokenType.LINE.getValue(), String.valueOf(fileLineNumber));
+
+        final LogLine log;
+        try {
+            log = OBJECT_MAPPER.readValue(line, LogLine.class);
+        } catch (JsonProcessingException e) {
+            LOGGER.info("Unable to parse log line. message[{}]", line, e);
+            return telemetry;
+        }
+
+        final Map<String, Object> properties = log.getProperties();
+        final Object o = properties.remove(options.getLogLevel());
+        telemetry.setSeverityLevel(getSeverity(o != null ? o.toString() : null));
+
+        final Object raw = properties.remove(options.getMessageKey());
+        if (raw == null) {
+            LOGGER.warn("Could not get the log's message. line[{}] key[{}] line[{}]", fileLineNumber,
+                    options.getMessageKey(), line);
+
+            telemetry.setMessage(line);
+        } else {
+            final String message = raw.toString();
+            try {
+                parseSdkMessage(telemetry, message);
+            } catch (JsonProcessingException e) {
+                LOGGER.info("Could not parse SDK message as JSON object. message[{}]", message);
             }
         }
 
-        return false;
+        properties.forEach((key, value) -> telemetry.getProperties().put(key, value != null ? value.toString() : NULL));
+
+        return telemetry;
     }
 
-    private TraceTelemetry parseLine(String line, Layout layout, long fileLineNumber) throws JsonProcessingException {
-        final String replaced = MULTIPLE_WHITESPACE.matcher(line).replaceAll(" ");
+    private TraceTelemetry parseLine(String line, long fileLineNumber, Layout layout) {
+        final String replaced = MULTIPLE_WHITESPACE_PATTERN.matcher(line).replaceAll(" ");
         final TraceTelemetry telemetry = new TraceTelemetry();
 
         String dateStr = null;
@@ -123,16 +142,21 @@ public class LogParser {
 
             final String key = next.getName().trim();
             final String value = replaced.substring(ind, sepInd).trim();
+            final TokenType tokenType = TokenType.fromString(key);
 
-            if (key.equals("level")) {
-                final SeverityLevel severityLevel = getSeverity(value);
-                telemetry.setSeverityLevel(severityLevel);
-            } else if (key.equals("date")) {
-                dateStr = value;
-            } else if (key.equals("time")) {
-                timeStr = value;
-            } else {
-                telemetry.getProperties().putIfAbsent(key, value);
+            switch (tokenType) {
+                case DATE:
+                    dateStr = value;
+                    break;
+                case TIME:
+                    timeStr = value;
+                    break;
+                case LOG_LEVEL:
+                    final SeverityLevel severityLevel = getSeverity(value);
+                    telemetry.setSeverityLevel(severityLevel);
+                    break;
+                default:
+                    telemetry.getProperties().putIfAbsent(key, value);
             }
 
             ind = sepInd + next.getSeparator().length();
@@ -148,47 +172,66 @@ public class LogParser {
         // LogAnalytics/AppInsights don't like timestamps in the past, so we'll put them on custom dimension
         final Map<String, String> customProperties = telemetry.getProperties();
 
-        customProperties.put("timestamp", dateStr + " " + timeStr);
-        customProperties.put("line", String.valueOf(fileLineNumber));
+        customProperties.put(TokenType.TIMESTAMP.getValue(), dateStr + " " + timeStr);
+        customProperties.put(TokenType.LINE.getValue(), String.valueOf(fileLineNumber));
 
         try {
-            final HashMap<String, Object> properties = parseSdkMessage(sdkMessage);
-            properties.forEach((key, value) -> {
-                final String finalValue = value == null ? NULL : value.toString();
-
-                customProperties.put(key, finalValue);
-            });
-
-            final Object value = properties.getOrDefault(AZ_SDK_MESSAGE_KEY, sdkMessage);
-            telemetry.setMessage(value != null ? value.toString() : sdkMessage);
+            parseSdkMessage(telemetry, sdkMessage);
         } catch (JsonProcessingException e) {
-            LOGGER.info("Could not parse SDK message as JSON object. message:{}", sdkMessage, e);
-            telemetry.setMessage(sdkMessage);
-        } finally {
-            telemetryClient.trackTrace(telemetry);
+            LOGGER.info("Could not parse SDK message as JSON object. message[{}]", sdkMessage);
         }
 
         return telemetry;
     }
 
-    private HashMap<String, Object> parseSdkMessage(String message)
-            throws JsonProcessingException {
+    /**
+     * Parses the SDK log message and updates the telemetry.
+     *
+     * @param telemetry Telemetry to update.
+     * @param message message to parse.
+     *
+     * @throws JsonProcessingException If it was unable to parse the message into a JSON object.
+     */
+    private void parseSdkMessage(TraceTelemetry telemetry, String message) throws JsonProcessingException {
+        HashMap<String, Object> properties;
         try {
-            return OBJECT_MAPPER.readValue(message, TYPE_REFERENCE);
+            properties = OBJECT_MAPPER.readValue(message, TYPE_REFERENCE);
         } catch (JsonProcessingException e) {
             // Possible that we missed some trailing characters when extracting the SDK message.
             int firstCurlyBrace = message.indexOf('{');
+
             if (firstCurlyBrace == -1) {
+                telemetry.setMessage(message);
                 throw e;
             }
 
             final String parsed = message.substring(firstCurlyBrace);
 
-            return OBJECT_MAPPER.readValue(parsed, TYPE_REFERENCE);
+            properties = OBJECT_MAPPER.readValue(parsed, TYPE_REFERENCE);
         }
+
+        if (properties == null) {
+            LOGGER.info("Could not read SDK message using default. message[{}]", message);
+
+            telemetry.setMessage(message);
+            return;
+        }
+
+        properties.forEach((key, value) -> {
+            final String finalValue = value == null ? NULL : value.toString();
+            telemetry.getProperties().put(key, finalValue);
+        });
+
+        final Object value = properties.remove(AZ_SDK_MESSAGE_KEY);
+
+        telemetry.setMessage(value != null ? value.toString() : message);
     }
 
     private static SeverityLevel getSeverity(String value) {
+        if (value == null) {
+            return SeverityLevel.Verbose;
+        }
+
         switch (value) {
             case "INFO":
                 return SeverityLevel.Information;
@@ -201,7 +244,16 @@ public class LogParser {
         }
     }
 
-    private static final class Log {
-        JsonNode[] lines;
+    private static final class LogLine {
+        private final Map<String, Object> properties = new HashMap<>();
+
+        @JsonAnySetter
+        void setProperty(String key, Object value) {
+            properties.put(key, value);
+        }
+
+        Map<String, Object> getProperties() {
+            return properties;
+        }
     }
 }

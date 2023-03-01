@@ -72,16 +72,17 @@ public class LogParserApp {
             return;
         }
 
+        final boolean isJson = optionsToUse instanceof JsonLogParserOptions;
         final RunInfo runInformation = getRunInformation(optionsToUse);
         final TelemetryClient telemetryClient = getTelemetryClient(optionsToUse, runInformation);
         final Path pathToFile = getPathAndUnzipIfNeeded(optionsToUse.getFileOrDirectory(), optionsToUse.unzipFile());
 
-        final LogParser logParser = new LogParser(telemetryClient, runInformation);
+        final LogParser logParser = new LogParser(telemetryClient, runInformation, jsonCommand);
 
         for (var file : listFiles(pathToFile)) {
             runInformation.nextFile(file.getAbsolutePath());
             try (var fileReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
-                logParser.parse(fileReader, plainTextCommand.getLayout());
+                logParser.parse(fileReader, plainTextCommand.getLayout(), isJson);
             } catch (IOException e) {
                 throw new UncheckedIOException("Unable to read file: " + file, e);
             }

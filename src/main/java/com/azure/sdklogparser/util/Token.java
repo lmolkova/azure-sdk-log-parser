@@ -23,7 +23,7 @@ public class Token {
         this.separator = separator;
 
         final String toLower = name.toLowerCase(Locale.ROOT);
-        this.tokenType = TOKEN_TYPE_MAP.getOrDefault(toLower, TokenType.DEFAULT);
+        this.tokenType = TOKEN_TYPE_MAP.get(toLower);
     }
 
     public String getName() {

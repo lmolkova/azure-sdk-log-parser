@@ -27,7 +27,7 @@ public class LogParserOptions {
     @Parameter(names = {"-z", "--unzip"}, description = "Unzip file before processing (will be done if file extension is 'zip')")
     private boolean unzipFile = false;
 
-    @Parameter(names = {"-m", "--max-lines-per-file"}, description = "Max number of lines to process in dry run.")
+    @Parameter(names = {"-ml", "--max-lines-per-file"}, description = "Max number of lines to process in dry run.")
     private Long maxLinesPerFile = 3L;
 
     @Parameter(names = {"-h", "--help"}, description = "Print help", help = true)
