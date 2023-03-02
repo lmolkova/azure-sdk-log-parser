@@ -1,7 +1,7 @@
 package com.azure.sdklogparser;
 
 import com.azure.sdklogparser.util.ArchiveHelper;
-import com.azure.sdklogparser.util.PrintTelemetryClient;
+import com.azure.sdklogparser.util.ConsoleTelemetryClient;
 import com.azure.sdklogparser.util.RunInfo;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterException;
@@ -99,7 +99,7 @@ public class LogParserApp {
     private static TelemetryClient getTelemetryClient(LogParserOptions options, RunInfo runInfo) {
         final TelemetryClient telemetryClient;
         if (options.isDryRun()) {
-            telemetryClient = new PrintTelemetryClient();
+            telemetryClient = new ConsoleTelemetryClient();
         } else {
             TelemetryConfiguration config = new TelemetryConfiguration();
             TelemetryInitializer initializer = telemetry -> {

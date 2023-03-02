@@ -18,7 +18,7 @@ public class PlaintextLogParserOptions extends LogParserOptions {
 
     @Parameter(names = {"-l", "--layout"}, description = "Layout of each log line. Each parameter name is enclosed "
             + "with < >. Parameters supported are in the \"KNOWN PARAMETERS\" section. "
-            + "If parameter <message> is not specified, it is assumed to be at the end of the log line.",
+            + "If parameter <message> is not specified, it is assumed to be at the end of the log line. See EXAMPLES.",
             order = 1, converter = LayoutConverter.class)
     private Layout layout = Layout.DEFAULT;
 
