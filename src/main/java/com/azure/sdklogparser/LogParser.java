@@ -125,6 +125,7 @@ public class LogParser {
 
         String dateStr = null;
         String timeStr = null;
+        String timestampStr = null;
         int ind = 0;
         String sdkMessage = null;
 
@@ -158,6 +159,8 @@ public class LogParser {
                     case TIME:
                         timeStr = value;
                         break;
+                    case TIMESTAMP:
+                        timestampStr = value;
                     case LOG_LEVEL:
                         final SeverityLevel severityLevel = getSeverity(value);
                         telemetry.setSeverityLevel(severityLevel);
@@ -177,10 +180,15 @@ public class LogParser {
             telemetry.getProperties().put("original-message", line);
         }
 
-        // LogAnalytics/AppInsights don't like timestamps in the past, so we'll put them on custom dimension
+        // LogAnalytics/AppInsights doesn't like timestamps in the past, so we'll put them in the custom dimension
         final Map<String, String> customProperties = telemetry.getProperties();
 
-        customProperties.put(TokenType.TIMESTAMP.getValue(), dateStr + " " + timeStr);
+        // If they didn't have a timestamp field in their layout, we'll create one from the combination of date
+        // and time.
+        if (timestampStr == null) {
+            timestampStr = dateStr + " " + timeStr;
+        }
+        customProperties.put(TokenType.TIMESTAMP.getValue(), timestampStr);
         customProperties.put(TokenType.LINE.getValue(), String.valueOf(fileLineNumber));
 
         try {
@@ -193,7 +201,7 @@ public class LogParser {
     }
 
     /**
-     * Parses the SDK log message and updates the telemetry.
+     * Parses the SDK log message and updates the trace telemetry.
      *
      * @param telemetry Telemetry to update.
      * @param message message to parse.
@@ -230,7 +238,7 @@ public class LogParser {
             telemetry.getProperties().put(key, finalValue);
         });
 
-        final Object value = properties.remove(AZ_SDK_MESSAGE_KEY);
+        final Object value = properties.get(AZ_SDK_MESSAGE_KEY);
 
         telemetry.setMessage(value != null ? value.toString() : message);
     }
