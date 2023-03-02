@@ -7,8 +7,10 @@ import com.beust.jcommander.Parameters;
 /**
  * When the log is a json object.
  */
-@Parameters(commandDescription = "Parsing a log that is a JSON object with each log line as an object.")
+@Parameters(commandDescription = "Parse a log where each line is a JSON object.")
 public class JsonLogParserOptions extends LogParserOptions {
+    public static final String COMMAND_NAME = "json";
+
     @Parameter(names = {"-m", "--message"},
             description = "Key name in JSON object containing the actual log message.",
             order = 1)
@@ -52,11 +54,6 @@ public class JsonLogParserOptions extends LogParserOptions {
 
     public String getThread() {
         return thread;
-    }
-
-    @Override
-    public String getCommandName() {
-        return "json";
     }
 
     @Override

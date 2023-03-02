@@ -34,8 +34,8 @@ public class LogParserApp {
         final JsonLogParserOptions jsonCommand = new JsonLogParserOptions();
 
         final JCommander jCommander = JCommander.newBuilder()
-                .addCommand(plainTextCommand.getCommandName(), plainTextCommand)
-                .addCommand(jsonCommand.getCommandName(), jsonCommand)
+                .addCommand(PlaintextLogParserOptions.COMMAND_NAME, plainTextCommand)
+                .addCommand(JsonLogParserOptions.COMMAND_NAME, jsonCommand)
                 .build();
         jCommander.setProgramName("log-parser");
 
@@ -52,14 +52,14 @@ public class LogParserApp {
         final String command = jCommander.getParsedCommand();
 
         final LogParserOptions optionsToUse;
-        if (plainTextCommand.getCommandName().equalsIgnoreCase(command)) {
+        if (PlaintextLogParserOptions.COMMAND_NAME.equalsIgnoreCase(command)) {
             if (plainTextCommand.isPrintHelp()) {
                 printHelp(jCommander, plainTextCommand, jsonCommand);
                 return;
             }
 
             optionsToUse = plainTextCommand;
-        } else if (jsonCommand.getCommandName().equalsIgnoreCase(command)) {
+        } else if (JsonLogParserOptions.COMMAND_NAME.equalsIgnoreCase(command)) {
             if (jsonCommand.isPrintHelp()) {
                 printHelp(jCommander, plainTextCommand, jsonCommand);
                 return;
@@ -131,21 +131,14 @@ public class LogParserApp {
         return new RunInfo(runIdPrefix, options.isDryRun(), numberOfLinesToProcess);
     }
 
-    private static void process(RunInfo runInfo, JsonLogParserOptions options) {
-
-    }
-
-    private static void process(RunInfo runInfo, PlaintextLogParserOptions options) {
-
-    }
-
-    private static void printHelp(JCommander jCommander, LogParserOptions... command) {
+    private static void printHelp(JCommander jCommander, LogParserOptions... commands) {
         jCommander.usage();
-        System.out.println("Examples\n\n");
 
-        Arrays.stream(command).forEach(option -> {
-            System.out.println(option.getExamples());
-            System.out.println();
+        jCommander.getConsole().println(PlaintextLogParserOptions.getSupportedParameters());
+        jCommander.getConsole().println("--------- EXAMPLES ---------\n\n");
+
+        Arrays.stream(commands).forEach(option -> {
+            jCommander.getConsole().println(option.getExamples());
         });
     }
 

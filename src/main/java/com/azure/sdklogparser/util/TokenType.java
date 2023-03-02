@@ -6,27 +6,33 @@ import java.util.Locale;
 import java.util.Map;
 
 public enum TokenType {
-    DATE("date"),
-    TIME("time"),
-    TIMESTAMP("timestamp"),
-    MESSAGE("message"),
-    LOG_LEVEL("level"),
-    CLASS("class"),
-    LOGGER("logger"),
-    THREAD("thread"),
-    LINE("line");
+    DATE("date", "Date of the log. Used in conjunction with 'time'."),
+    TIME("time", "Time of the log. Used in conjunction with 'date'."),
+    TIMESTAMP("timestamp", "Date and time of log. Mutually exclusive from 'date' and 'time'."),
+    MESSAGE("message", "Log message."),
+    LOG_LEVEL("level", "Log level."),
+    LOGGER("logger", "Name of logger or class being logged."),
+    THREAD("thread", "Name of thread."),
+    LINE("line", "Line number.");
 
     private static final Map<String, TokenType> TOKEN_TYPE_MAP = Arrays.stream(TokenType.values())
             .collect(HashMap::new, (existing, value) -> existing.put(value.getValue(), value),
                     (a, b) -> a.putAll(b));
     private final String value;
 
-    TokenType(String value) {
+    private final String description;
+
+    TokenType(String value, String description) {
         this.value = value;
+        this.description = description;
     }
 
     public String getValue() {
         return value;
+    }
+
+    public String getDescription() {
+        return description;
     }
 
     public static TokenType fromString(String value) {

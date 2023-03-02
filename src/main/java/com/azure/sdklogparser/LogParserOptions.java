@@ -65,10 +65,6 @@ public class LogParserOptions {
         return printHelp;
     }
 
-    public String getCommandName() {
-        return "";
-    }
-
     public String getExamples() {
         return "";
     }
