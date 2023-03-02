@@ -27,7 +27,7 @@ public class Layout {
         // They didn't have any message token, so we assume it is at the end.
         if (!tokens.stream().anyMatch(t -> t.getTokenType() == TokenType.MESSAGE)) {
             LOGGER.info("Did not find message token in layout. Assuming it is at the end.");
-            tokens.add(new Token("message", null));
+            tokens.add(new Token(TokenType.MESSAGE.getValue(), null));
         }
 
         return new Layout(tokens);
