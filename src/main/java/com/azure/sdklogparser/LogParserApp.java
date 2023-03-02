@@ -102,7 +102,7 @@ public class LogParserApp {
         }
 
         final TelemetryClient telemetryClient;
-        if (options.isDryRun() && connectionString != null) {
+        if (options.isDryRun() || connectionString == null) {
             telemetryClient = new PrintTelemetryClient();
         } else {
             TelemetryConfiguration config = new TelemetryConfiguration();
