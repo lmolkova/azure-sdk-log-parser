@@ -72,6 +72,11 @@ public class LogParserApp {
             return;
         }
 
+        if (optionsToUse.getConnectionString() == null) {
+            System.out.println("Connection string is missing, making it a dry-run.");
+            optionsToUse.setIsDryRun(true);
+        }
+
         final boolean isJson = optionsToUse instanceof JsonLogParserOptions;
         final RunInfo runInformation = getRunInformation(optionsToUse);
         final TelemetryClient telemetryClient = getTelemetryClient(optionsToUse, runInformation);
@@ -92,17 +97,8 @@ public class LogParserApp {
     }
 
     private static TelemetryClient getTelemetryClient(LogParserOptions options, RunInfo runInfo) {
-        final String connectionString;
-        if (options.getConnectionString() != null) {
-            connectionString = options.getConnectionString();
-        } else {
-            System.out.println("Connection string is missing, making it a dry-run");
-            options.setIsDryRun(true);
-            connectionString = null;
-        }
-
         final TelemetryClient telemetryClient;
-        if (options.isDryRun() || connectionString == null) {
+        if (options.isDryRun()) {
             telemetryClient = new PrintTelemetryClient();
         } else {
             TelemetryConfiguration config = new TelemetryConfiguration();
@@ -112,7 +108,7 @@ public class LogParserApp {
             };
 
             config.getTelemetryInitializers().add(initializer);
-            config.setConnectionString(Objects.requireNonNull(connectionString));
+            config.setConnectionString(Objects.requireNonNull(options.getConnectionString()));
             config.setChannel(new InProcessTelemetryChannel(config));
 
             telemetryClient = new TelemetryClient(config);
@@ -126,6 +122,7 @@ public class LogParserApp {
         final String runIdPrefix = options.getRunId() != null
                 ? options.getRunId()
                 : Paths.get(fileName).getFileName().toString();
+
         final long numberOfLinesToProcess = options.isDryRun() ? options.getMaxLinesPerFile() : Long.MAX_VALUE;
 
         return new RunInfo(runIdPrefix, options.isDryRun(), numberOfLinesToProcess);

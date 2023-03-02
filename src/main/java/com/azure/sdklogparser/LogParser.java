@@ -19,7 +19,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.HashMap;
-import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -53,17 +53,14 @@ public class LogParser {
     public void parse(InputStreamReader text, Layout layout, boolean isJson) throws IOException {
         long fileLineNumber = 0;
         try (BufferedReader br = new BufferedReader(text)) {
-            String prevLine = br.readLine();
             String line;
-            fileLineNumber++;
-            if (prevLine == null) {
-                LOGGER.error("File is empty.");
-                return;
-            }
-
             while (runInfo.shouldKeepGoing() && (line = br.readLine()) != null) {
                 processLine(isJson, line, fileLineNumber, layout);
                 fileLineNumber++;
+            }
+
+            if (fileLineNumber == 0) {
+                LOGGER.error("File is empty.");
             }
         } finally {
             telemetryClient.flush();
@@ -129,12 +126,19 @@ public class LogParser {
         String dateStr = null;
         String timeStr = null;
         int ind = 0;
+        String sdkMessage = null;
 
-        final Iterator<Token> it = layout.getIterator();
-        while (it.hasNext()) {
-            final Token next = it.next();
+        final List<Token> layoutTokens = layout.getTokens();
+        final int lastIndex = layoutTokens.size() - 1;
 
-            final int sepInd = replaced.indexOf(next.getSeparator(), ind);
+        for (int i = 0; i < layoutTokens.size(); i++) {
+            final Token next = layoutTokens.get(i);
+            final boolean isLastToken = i == lastIndex;
+
+            final int sepInd =  isLastToken
+                    ? replaced.length()
+                    : replaced.indexOf(next.getSeparator(), ind);
+
             if (sepInd < 0) {
                 LOGGER.error("LINE {}: can't find '{}' in '{}'", fileLineNumber, next.getName(), replaced);
                 return null;
@@ -144,26 +148,30 @@ public class LogParser {
             final String value = replaced.substring(ind, sepInd).trim();
             final TokenType tokenType = TokenType.fromString(key);
 
-            switch (tokenType) {
-                case DATE:
-                    dateStr = value;
-                    break;
-                case TIME:
-                    timeStr = value;
-                    break;
-                case LOG_LEVEL:
-                    final SeverityLevel severityLevel = getSeverity(value);
-                    telemetry.setSeverityLevel(severityLevel);
-                    break;
-                default:
-                    telemetry.getProperties().putIfAbsent(key, value);
+            if (tokenType == null) {
+                telemetry.getProperties().putIfAbsent(key, value);
+            } else {
+                switch (tokenType) {
+                    case DATE:
+                        dateStr = value;
+                        break;
+                    case TIME:
+                        timeStr = value;
+                        break;
+                    case LOG_LEVEL:
+                        final SeverityLevel severityLevel = getSeverity(value);
+                        telemetry.setSeverityLevel(severityLevel);
+                        break;
+                    case MESSAGE:
+                        sdkMessage = value;
+                        break;
+                    default:
+                        telemetry.getProperties().putIfAbsent(key, value);
+                }
             }
 
             ind = sepInd + next.getSeparator().length();
         }
-
-        // Assuming SDK message is last index.
-        final String sdkMessage = line.substring(ind);
 
         if (runInfo.isDryRun() || LOGGER.isDebugEnabled()) {
             telemetry.getProperties().put("original-message", line);
