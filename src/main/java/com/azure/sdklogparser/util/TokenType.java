@@ -1,10 +1,15 @@
 package com.azure.sdklogparser.util;
 
+import com.microsoft.applicationinsights.telemetry.Telemetry;
+
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * Known types that can be mapped to properties in {@link Telemetry}.
+ */
 public enum TokenType {
     DATE("date", "Date of the log. Used in conjunction with 'time'."),
     TIME("time", "Time of the log. Used in conjunction with 'date'."),

@@ -1,5 +1,6 @@
 package com.azure.sdklogparser.util;
 
+import com.azure.sdklogparser.PlaintextLogParserOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,6 +10,11 @@ import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * Describes the format of a plaintext log line.
+ *
+ * @see PlaintextLogParserOptions
+ */
 public class Layout {
     private static final Logger LOGGER = LoggerFactory.getLogger(Layout.class);
 

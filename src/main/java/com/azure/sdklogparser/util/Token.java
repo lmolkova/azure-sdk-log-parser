@@ -1,10 +1,18 @@
 package com.azure.sdklogparser.util;
 
+import com.azure.sdklogparser.PlaintextLogParserOptions;
+
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * Describes a parameter in the {@link Layout}.
+ *
+ * @see PlaintextLogParserOptions
+ * @see Layout
+ */
 public class Token {
     private static final Map<String, TokenType> TOKEN_TYPE_MAP;
 
