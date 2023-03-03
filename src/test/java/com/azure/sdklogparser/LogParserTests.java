@@ -3,6 +3,7 @@ package com.azure.sdklogparser;
 import com.azure.sdklogparser.util.Layout;
 import com.azure.sdklogparser.util.RunInfo;
 import com.azure.sdklogparser.util.TokenType;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.applicationinsights.TelemetryClient;
@@ -14,7 +15,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.slf4j.event.Level;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -139,10 +142,15 @@ public class LogParserTests {
         assertTrue(actual.isEmpty());
     }
 
+    /**
+     * Tests that it can parse a line with timestamp specified and since dry-run is false, does not have
+     * "original-line".
+     */
     @Test
-    public void parsePlaintextDefaultLayout() {
+    public void parsePlaintextLayoutTimestamp() {
         // Arrange
-        final LogParser parser = new LogParser(telemetryClient, runInfo, jsonLogParserOptions);
+        final RunInfo nonDryRun = new RunInfo("foo-bar", false, 15L);
+        final LogParser parser = new LogParser(telemetryClient, nonDryRun, jsonLogParserOptions);
 
         final long lineNumber = 10;
         final Layout layout = Layout.fromString("[<timestamp>] (<level>) (<thread>) <logger> <custom> ");
@@ -161,10 +169,8 @@ public class LogParserTests {
 
         assertEquals(String.valueOf(lineNumber), actual.remove(TokenType.LINE.getValue()));
 
-        // dryRun = true, so we have the original message
-        assertEquals(message, actual.remove(ORIGINAL_MESSAGE_KEY));
-
-        assertEquals("[2021-10-01 06:31:57,637", actual.remove(TokenType.TIMESTAMP.getValue()));;
+        assertEquals("[2021-10-01 06:31:57,637", actual.remove(TokenType.TIMESTAMP.getValue()));
+        ;
         assertEquals("reactor-executor-1", actual.remove(TokenType.THREAD.getValue()));
         assertEquals("c.a.m.ClientLogger", actual.remove(TokenType.LOGGER.getValue()));
         assertEquals("customValue", actual.remove("custom"));
@@ -179,4 +185,272 @@ public class LogParserTests {
             assertEquals(expectedValue, actualValue);
         });
     }
+
+    /**
+     * Tests that it can parse a line with date and time layout.
+     */
+    @Test
+    public void parsePlaintextLayout() {
+        // Arrange
+        final LogParser parser = new LogParser(telemetryClient, runInfo, jsonLogParserOptions);
+
+        final long lineNumber = 10;
+        final Layout layout = Layout.fromString("[<date> - <time>] (<level>) <logger>: <message>");
+        final String message = "[2022-12-10 - 06:31:10] (ERROR) c.a.m.ClientLogger: " + sdkMessageJson;
+
+        // Act
+        final TraceTelemetry actualTelemetry = parser.parseLine(message, lineNumber, layout);
+
+        // Assert
+        assertEquals(SeverityLevel.Error, actualTelemetry.getSeverityLevel());
+        assertEquals(MESSAGE, actualTelemetry.getMessage());
+
+        // Create shallow object to remove references from.
+        final Map<String, String> actual = new HashMap<>(actualTelemetry.getProperties());
+
+        assertEquals(String.valueOf(lineNumber), actual.remove(TokenType.LINE.getValue()));
+
+        // dryRun = true, so we have the original message
+        assertEquals(message, actual.remove(ORIGINAL_MESSAGE_KEY));
+
+        assertEquals("[2022-12-10 06:31:10", actual.remove(TokenType.TIMESTAMP.getValue()));
+        ;
+        assertEquals("c.a.m.ClientLogger", actual.remove(TokenType.LOGGER.getValue()));
+
+        // See what is left over.
+        assertEquals(sdkMessageMap.size(), actual.size());
+
+        sdkMessageMap.forEach((expectedKey, expectedValue) -> {
+            assertTrue(actual.containsKey(expectedKey));
+
+            final String actualValue = actual.get(expectedKey);
+            assertEquals(expectedValue, actualValue);
+        });
+    }
+
+    /**
+     * Parse JSON with default token type names defined in {@link TokenType}.
+     */
+    @Test
+    public void parseJson() throws JsonProcessingException {
+        // Arrange
+        final RunInfo nonDryRun = new RunInfo("foo-bar", false, 15L);
+
+        // Default JsonLogParserOptions used.
+        final LogParser parser = new LogParser(telemetryClient, nonDryRun, jsonLogParserOptions);
+        final String instantRepresentation = Instant.ofEpochMilli(1677869692082L).toString();
+
+        final long lineNumber = 15;
+
+        final TestLogLine line = new TestLogLine();
+        line.setLogger("com.azure.messaging.eventhubs.PartitionPumpManager");
+        line.setTimestamp(instantRepresentation);
+        line.setThread("reactor-executor-1");
+        line.setLevel(Level.ERROR);
+        line.setMessage(sdkMessageJson);
+
+        final String lineSerialized = OBJECT_MAPPER.writeValueAsString(line);
+
+        // Act
+        final TraceTelemetry actualTelemetry = parser.parseLine(lineSerialized, lineNumber, jsonLogParserOptions);
+
+        // Assert
+        assertEquals(SeverityLevel.Error, actualTelemetry.getSeverityLevel());
+        assertEquals(MESSAGE, actualTelemetry.getMessage());
+
+        // Create shallow object to remove references from.
+        final Map<String, String> actual = new HashMap<>(actualTelemetry.getProperties());
+
+        assertEquals(String.valueOf(lineNumber), actual.remove(TokenType.LINE.getValue()));
+
+        assertEquals(instantRepresentation, actual.remove(TokenType.TIMESTAMP.getValue()));
+        ;
+        assertEquals("reactor-executor-1", actual.remove(TokenType.THREAD.getValue()));
+        assertEquals("com.azure.messaging.eventhubs.PartitionPumpManager",
+                actual.remove(TokenType.LOGGER.getValue()));
+
+        // See what is left over.
+        assertEquals(sdkMessageMap.size(), actual.size());
+
+        sdkMessageMap.forEach((expectedKey, expectedValue) -> {
+            assertTrue(actual.containsKey(expectedKey));
+
+            final String actualValue = actual.get(expectedKey);
+            assertEquals(expectedValue, actualValue);
+        });
+    }
+
+    /**
+     * Parse JSON with default token type names defined in {@link TokenType}.
+     */
+    @Test
+    public void parseJsonCustomFieldNames() throws JsonProcessingException {
+        // Arrange
+        final RunInfo nonDryRun = new RunInfo("foo-bar", true, 15L);
+
+        jsonLogParserOptions.setIsDryRun(true);
+        jsonLogParserOptions.setMessageKey(CustomLogLine.MESSAGE_KEY);
+        jsonLogParserOptions.setTimestamp(CustomLogLine.TIMESTAMP_KEY);
+        jsonLogParserOptions.setThread(CustomLogLine.THREAD_KEY);
+        jsonLogParserOptions.setLogger(CustomLogLine.LOGGER_KEY);
+        jsonLogParserOptions.setLogLevel(CustomLogLine.LEVEL_KEY);
+
+        // Default JsonLogParserOptions used.
+        final LogParser parser = new LogParser(telemetryClient, nonDryRun, jsonLogParserOptions);
+        final String instantRepresentation = Instant.ofEpochMilli(1677869692082L).toString();
+
+        final long lineNumber = 15;
+
+        final CustomLogLine line = new CustomLogLine();
+        line.setLogger("com.azure.messaging.eventhubs.PartitionPumpManager");
+        line.setTimestamp(instantRepresentation);
+        line.setThread("reactor-executor-1");
+        line.setLevel(Level.ERROR);
+        line.setMessage(sdkMessageJson);
+
+        final String lineSerialized = OBJECT_MAPPER.writeValueAsString(line);
+
+        // Act
+        final TraceTelemetry actualTelemetry = parser.parseLine(lineSerialized, lineNumber, jsonLogParserOptions);
+
+        // Assert
+        assertEquals(SeverityLevel.Error, actualTelemetry.getSeverityLevel());
+        assertEquals(MESSAGE, actualTelemetry.getMessage());
+
+        // Create shallow object to remove references from.
+        final Map<String, String> actual = new HashMap<>(actualTelemetry.getProperties());
+
+        assertEquals(String.valueOf(lineNumber), actual.remove(TokenType.LINE.getValue()));
+
+        assertEquals(instantRepresentation, actual.remove(TokenType.TIMESTAMP.getValue()));
+        assertEquals("reactor-executor-1", actual.remove(TokenType.THREAD.getValue()));
+        assertEquals("com.azure.messaging.eventhubs.PartitionPumpManager",
+                actual.remove(TokenType.LOGGER.getValue()));
+
+        // See what is left over.
+        assertEquals(sdkMessageMap.size(), actual.size());
+
+        sdkMessageMap.forEach((expectedKey, expectedValue) -> {
+            assertTrue(actual.containsKey(expectedKey));
+
+            final String actualValue = actual.get(expectedKey);
+            assertEquals(expectedValue, actualValue);
+        });
+    }
+
+    /**
+     * A possible user log line. Names of fields default from {@link TokenType}.
+     */
+    private static final class TestLogLine {
+        private String logger;
+        private String timestamp;
+        private Level level;
+        private String thread;
+
+        private String message;
+
+        public String getLogger() {
+            return logger;
+        }
+
+        public void setLogger(String logger) {
+            this.logger = logger;
+        }
+
+        public String getTimestamp() {
+            return timestamp;
+        }
+
+        public void setTimestamp(String timestamp) {
+            this.timestamp = timestamp;
+        }
+
+        public Level getLevel() {
+            return level;
+        }
+
+        public void setLevel(Level level) {
+            this.level = level;
+        }
+
+        public String getThread() {
+            return thread;
+        }
+
+        public void setThread(String thread) {
+            this.thread = thread;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public void setMessage(String message) {
+            this.message = message;
+        }
+    }
+
+    /**
+     * A possible user log line with custom field names.
+     */
+    private static final class CustomLogLine {
+        static final String LOGGER_KEY = "test-logger";
+        static final String TIMESTAMP_KEY = "test-timestamp";
+        static final String LEVEL_KEY = "test-log-level";
+        static final String THREAD_KEY = "test-thread";
+        static final String MESSAGE_KEY = "test-message";
+
+        @JsonProperty(LOGGER_KEY)
+        private String logger;
+        @JsonProperty(TIMESTAMP_KEY)
+        private String timestamp;
+        @JsonProperty(LEVEL_KEY)
+        private Level level;
+        @JsonProperty(THREAD_KEY)
+        private String thread;
+
+        @JsonProperty(MESSAGE_KEY)
+        private String message;
+
+        public String getLogger() {
+            return logger;
+        }
+
+        public void setLogger(String logger) {
+            this.logger = logger;
+        }
+
+        public String getTimestamp() {
+            return timestamp;
+        }
+
+        public void setTimestamp(String timestamp) {
+            this.timestamp = timestamp;
+        }
+
+        public Level getLevel() {
+            return level;
+        }
+
+        public void setLevel(Level level) {
+            this.level = level;
+        }
+
+        public String getThread() {
+            return thread;
+        }
+
+        public void setThread(String thread) {
+            this.thread = thread;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public void setMessage(String message) {
+            this.message = message;
+        }
+    }
+
 }

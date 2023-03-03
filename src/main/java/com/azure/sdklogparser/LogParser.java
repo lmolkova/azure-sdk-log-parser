@@ -18,21 +18,30 @@ import org.slf4j.LoggerFactory;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class LogParser {
     private static final Logger LOGGER = LoggerFactory.getLogger(LogParser.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final TypeReference<HashMap<String, Object>> TYPE_REFERENCE = new TypeReference<>() {
     };
-    private static final Pattern MULTIPLE_WHITESPACE_PATTERN = Pattern.compile("[ ]{2,}");
+    private static final Pattern MULTIPLE_WHITESPACE_PATTERN = Pattern.compile(" {2,}");
     /**
      * Default value if the value for a key is null (i.e. errorDescription).
      */
     private static final String NULL = "null";
+    /**
+     * The fields to remap to known values.  Message and log level are skipped because they are set in other fields on
+     * The telemetry data.
+     */
+    private static final List<TokenType> TOKEN_TYPES_TO_REMAP = Arrays.stream(TokenType.values())
+            .filter(t -> t != TokenType.MESSAGE && t != TokenType.LOG_LEVEL)
+            .collect(Collectors.toList());
 
     static final String AZ_SDK_MESSAGE_KEY = "az.sdk.message";
     static final String ORIGINAL_MESSAGE_KEY = "original-message";
@@ -114,6 +123,11 @@ public class LogParser {
                 LOGGER.info("Could not parse SDK message as JSON object. message[{}]", message);
             }
         }
+
+        // Go through and remap the known parameters into consistent key names.
+        remapParameter(TokenType.TIMESTAMP, options.getTimestamp(), properties);
+        remapParameter(TokenType.LOGGER, options.getLogger(), properties);
+        remapParameter(TokenType.THREAD, options.getThread(), properties);
 
         properties.forEach((key, value) -> telemetry.getProperties().put(key, value != null ? value.toString() : NULL));
 
@@ -244,6 +258,20 @@ public class LogParser {
         final Object value = properties.get(AZ_SDK_MESSAGE_KEY);
 
         telemetry.setMessage(value != null ? value.toString() : message);
+    }
+
+    private static void remapParameter(TokenType expectedKey, String actualKey, Map<String, Object> map) {
+        if (expectedKey.getValue().equals(actualKey)) {
+            return;
+        }
+
+        if (!map.containsKey(actualKey)) {
+            return;
+        }
+
+        final Object removed = map.remove(actualKey);
+
+        map.put(expectedKey.getValue(), removed);
     }
 
     private static SeverityLevel getSeverity(String value) {

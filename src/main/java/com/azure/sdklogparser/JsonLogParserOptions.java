@@ -40,20 +40,40 @@ public class JsonLogParserOptions extends LogParserOptions {
         return messageKey;
     }
 
+    public void setMessageKey(String messageKey) {
+        this.messageKey = messageKey;
+    }
+
     public String getTimestamp() {
         return timestamp;
+    }
+
+    public void setTimestamp(String timestamp) {
+        this.timestamp = timestamp;
     }
 
     public String getLogger() {
         return logger;
     }
 
+    public void setLogger(String logger) {
+        this.logger = logger;
+    }
+
     public String getLogLevel() {
         return logLevel;
     }
 
+    public void setLogLevel(String logLevel) {
+        this.logLevel = logLevel;
+    }
+
     public String getThread() {
         return thread;
+    }
+
+    public void setThread(String thread) {
+        this.thread = thread;
     }
 
     @Override
