@@ -34,7 +34,8 @@ public class LogParser {
      */
     private static final String NULL = "null";
 
-    private static final String AZ_SDK_MESSAGE_KEY = "az.sdk.message";
+    static final String AZ_SDK_MESSAGE_KEY = "az.sdk.message";
+    static final String ORIGINAL_MESSAGE_KEY = "original-message";
 
     private final TelemetryClient telemetryClient;
     private final JsonLogParserOptions jsonLogParserOptions;
@@ -67,7 +68,7 @@ public class LogParser {
         }
     }
 
-    private void processLine(boolean isJson, String prevLine, long fileLineNumber, Layout layout) {
+    void processLine(boolean isJson, String prevLine, long fileLineNumber, Layout layout) {
         TraceTelemetry telemetry = null;
         try {
             if (isJson) {
@@ -83,7 +84,7 @@ public class LogParser {
         }
     }
 
-    private TraceTelemetry parseLine(String line, long fileLineNumber, JsonLogParserOptions options) {
+    TraceTelemetry parseLine(String line, long fileLineNumber, JsonLogParserOptions options) {
         final TraceTelemetry telemetry = new TraceTelemetry();
         telemetry.getProperties().put(TokenType.LINE.getValue(), String.valueOf(fileLineNumber));
 
@@ -119,7 +120,7 @@ public class LogParser {
         return telemetry;
     }
 
-    private TraceTelemetry parseLine(String line, long fileLineNumber, Layout layout) {
+    TraceTelemetry parseLine(String line, long fileLineNumber, Layout layout) {
         final String replaced = MULTIPLE_WHITESPACE_PATTERN.matcher(line).replaceAll(" ");
         final TraceTelemetry telemetry = new TraceTelemetry();
 
@@ -136,7 +137,7 @@ public class LogParser {
             final Token next = layoutTokens.get(i);
             final boolean isLastToken = i == lastIndex;
 
-            final int sepInd =  isLastToken
+            final int sepInd = isLastToken
                     ? replaced.length()
                     : replaced.indexOf(next.getSeparator(), ind);
 
@@ -173,11 +174,12 @@ public class LogParser {
                 }
             }
 
-            ind = sepInd + next.getSeparator().length();
+            final int nextIndex = next.getSeparator() != null ? next.getSeparator().length() : 0;
+            ind = sepInd + nextIndex;
         }
 
         if (runInfo.isDryRun() || LOGGER.isDebugEnabled()) {
-            telemetry.getProperties().put("original-message", line);
+            telemetry.getProperties().put(ORIGINAL_MESSAGE_KEY, line);
         }
 
         // LogAnalytics/AppInsights doesn't like timestamps in the past, so we'll put them in the custom dimension
@@ -201,14 +203,15 @@ public class LogParser {
     }
 
     /**
-     * Parses the SDK log message and updates the trace telemetry.
+     * Parses the SDK log message and updates the trace telemetry. If the message cannot be parsed, it is set as-is in
+     * the {@link TraceTelemetry#getMessage() telemetry.getMessage()}.
      *
      * @param telemetry Telemetry to update.
      * @param message message to parse.
      *
      * @throws JsonProcessingException If it was unable to parse the message into a JSON object.
      */
-    private void parseSdkMessage(TraceTelemetry telemetry, String message) throws JsonProcessingException {
+    void parseSdkMessage(TraceTelemetry telemetry, String message) throws JsonProcessingException {
         HashMap<String, Object> properties;
         try {
             properties = OBJECT_MAPPER.readValue(message, TYPE_REFERENCE);
