@@ -7,29 +7,40 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.applicationinsights.TelemetryClient;
+import com.microsoft.applicationinsights.extensibility.context.CloudContext;
 import com.microsoft.applicationinsights.telemetry.SeverityLevel;
 import com.microsoft.applicationinsights.telemetry.TelemetryContext;
 import com.microsoft.applicationinsights.telemetry.TraceTelemetry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.slf4j.event.Level;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static com.azure.sdklogparser.LogParser.ORIGINAL_MESSAGE_KEY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class LogParserTests {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String MESSAGE = "onConnectionRemoteClosed";
+    private static final String UNIQUE_ID = "test-unique-id";
+    private static final String RUN_ID = "test-run-name";
 
     private final TelemetryContext telemetryContext = new TelemetryContext();
     private final Map<String, String> sdkMessageMap = new HashMap<>();
@@ -42,13 +53,16 @@ public class LogParserTests {
     @Mock
     private TelemetryClient telemetryClient;
 
+    @Captor
+    private ArgumentCaptor<TraceTelemetry> telemetryCaptor;
+
     @BeforeEach
     public void beforeEach() throws JsonProcessingException {
         autoCloseable = MockitoAnnotations.openMocks(this);
 
         when(telemetryClient.getContext()).thenReturn(telemetryContext);
 
-        runInfo = new RunInfo("test-run-name", true, 10L);
+        runInfo = new RunInfo(RUN_ID, true, 10L, UNIQUE_ID);
         jsonLogParserOptions = new JsonLogParserOptions();
 
         sdkMessageMap.put("az.sdk.message", MESSAGE);
@@ -65,6 +79,19 @@ public class LogParserTests {
         if (autoCloseable != null) {
             autoCloseable.close();
         }
+    }
+
+    @Test
+    public void cloudInformationSet() {
+        // Act
+        final LogParser parser = new LogParser(telemetryClient, runInfo, jsonLogParserOptions);
+
+        // Assert
+        verify(telemetryClient).getContext();
+
+        final CloudContext cloudContext = telemetryContext.getCloud();
+        assertEquals(RUN_ID, cloudContext.getRole());
+        assertEquals(UNIQUE_ID, cloudContext.getRoleInstance());
     }
 
     /**
@@ -149,7 +176,7 @@ public class LogParserTests {
     @Test
     public void parsePlaintextLayoutTimestamp() {
         // Arrange
-        final RunInfo nonDryRun = new RunInfo("foo-bar", false, 15L);
+        final RunInfo nonDryRun = new RunInfo("foo-bar", false, 15L, UNIQUE_ID);
         final LogParser parser = new LogParser(telemetryClient, nonDryRun, jsonLogParserOptions);
 
         final long lineNumber = 10;
@@ -229,12 +256,38 @@ public class LogParserTests {
     }
 
     /**
+     * Parses a plaintext log file and outputs Telemetry as expected.
+     */
+    @Test
+    public void parsePlaintextLogFile() throws IOException {
+        // Arrange
+        final RunInfo plainTextRunInfo = new RunInfo("my-run-name", false, 100L, "my-unique-id");
+        final LogParser parser = new LogParser(telemetryClient, plainTextRunInfo, jsonLogParserOptions);
+        // 2023-01-10 11:30:23.701  INFO 8001 --- [main] c.a.m.s.ServiceBusClientBuilder: # of open clients with shared connection: 1
+        final Layout layout = Layout.fromString("<date> <time>  <level> <pid> --- [<thread>] <logger>          : <message>");
+
+        // Act
+        try (InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("plaintext.log");
+             InputStreamReader inputStreamReader = new InputStreamReader(inputStream)) {
+            parser.parse(inputStreamReader, layout, false);
+        }
+
+        // Assert
+        verify(telemetryClient, atLeastOnce()).trackTrace(telemetryCaptor.capture());
+        verify(telemetryClient).flush();
+
+        final List<TraceTelemetry> allValues = telemetryCaptor.getAllValues();
+
+        assertEquals(28, allValues.size());
+    }
+
+    /**
      * Parse JSON with default token type names defined in {@link TokenType}.
      */
     @Test
     public void parseJson() throws JsonProcessingException {
         // Arrange
-        final RunInfo nonDryRun = new RunInfo("foo-bar", false, 15L);
+        final RunInfo nonDryRun = new RunInfo("foo-bar", false, 15L, UNIQUE_ID);
 
         // Default JsonLogParserOptions used.
         final LogParser parser = new LogParser(telemetryClient, nonDryRun, jsonLogParserOptions);
@@ -286,7 +339,7 @@ public class LogParserTests {
     @Test
     public void parseJsonCustomFieldNames() throws JsonProcessingException {
         // Arrange
-        final RunInfo nonDryRun = new RunInfo("foo-bar", true, 15L);
+        final RunInfo nonDryRun = new RunInfo("foo-bar", true, 15L, UNIQUE_ID);
 
         jsonLogParserOptions.setIsDryRun(true);
         jsonLogParserOptions.setMessageKey(CustomLogLine.MESSAGE_KEY);
