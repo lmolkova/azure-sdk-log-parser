@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -46,7 +47,10 @@ public class Layout {
         this.tokens = Collections.unmodifiableList(tokens);
 
         this.display = tokens.stream()
-                .map(t -> "<" + t.getName() + ">" + t.getSeparator())
+                .map(t -> {
+                    final String separator = Objects.isNull(t.getSeparator()) ? "" : t.getSeparator();
+                    return "<" + t.getName() + ">" + separator;
+                })
                 .collect(Collectors.joining(""));
     }
 
