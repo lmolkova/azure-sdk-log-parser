@@ -2,7 +2,7 @@ package com.azure.sdklogparser;
 
 import com.beust.jcommander.Parameter;
 
-public class LogParserOptions {
+public abstract class LogParserOptions {
     public static final String APPLICATION_INSIGHTS_CONNECTION_STRING_NAME = "APPLICATIONINSIGHTS_CONNECTION_STRING";
 
     /**
@@ -64,6 +64,8 @@ public class LogParserOptions {
     public boolean isPrintHelp() {
         return printHelp;
     }
+
+    public abstract String getName();
 
     public String getExamples() {
         return "";

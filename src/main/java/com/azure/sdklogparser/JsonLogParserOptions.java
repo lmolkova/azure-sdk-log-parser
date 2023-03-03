@@ -77,8 +77,18 @@ public class JsonLogParserOptions extends LogParserOptions {
     }
 
     @Override
+    public String getName() {
+        return "JSON";
+    }
+
+    @Override
     public String getExamples() {
-        return "java -jar log-parser json -k message -f \"C:\\my-json.log\""
-                + "\n\tParses a log where the SDK message is stored in the \"message\" key of each JSON log object.";
+        String examples = "java -jar log-parser.jar json -m \"user.message\" -f \"C:\\my-json.log\""
+                + "\n\tParses a log where the SDK message is stored in the \"user.message\" key of each JSON log object.\n\n"
+                + "java -jar log-parser.jar json -f \"C:\\my-json.log\""
+                + "\n\tParses a log where the SDK message is stored in the default \"message\" key of each JSON log object.\n\n"
+                + "java -jar log-parser.jar json -m \"user.message\" --logLevel \"log.level\" -f \"C:\\my-json.log\""
+                + "\n\tParses a log where the SDK message is stored in \"user.message\" key of each JSON log object and severity level in \"log.level\" key.";
+        return examples;
     }
 }

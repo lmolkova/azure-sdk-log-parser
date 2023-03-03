@@ -34,6 +34,11 @@ public class PlaintextLogParserOptions extends LogParserOptions {
     }
 
     @Override
+    public String getName() {
+        return "PLAINTEXT";
+    }
+
+    @Override
     public String getExamples() {
         return "Example 1\t(custom log layout): java -jar log-parser.jar -f c:\\downloads\\logs.zip -l \"<date> <time> <level> [<thread>] <class> - \" -c InstrumentationKey=secret;IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/\n"
                 + "Example 2\t(default layout, print parsed logs): java -jar -Dorg.slf4j.simpleLogger.defaultLogLevel=debug log-parser.jar  -f c:\\downloads\\logs.log -c InstrumentationKey=secret;IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/\n"

@@ -135,6 +135,7 @@ public class LogParserApp {
         jCommander.getConsole().println("--------- EXAMPLES ---------\n\n");
 
         Arrays.stream(commands).forEach(option -> {
+            jCommander.getConsole().println(option.getName() + " EXAMPLES\n");
             jCommander.getConsole().println(option.getExamples());
         });
     }
