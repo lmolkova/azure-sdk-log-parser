@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -124,8 +125,9 @@ public class LogParserApp {
                 : Paths.get(fileName).getFileName().toString();
 
         final long numberOfLinesToProcess = options.isDryRun() ? options.getMaxLinesPerFile() : Long.MAX_VALUE;
+        final String uniqueId = String.valueOf(Instant.now().getEpochSecond());
 
-        return new RunInfo(runIdPrefix, options.isDryRun(), numberOfLinesToProcess);
+        return new RunInfo(runIdPrefix, options.isDryRun(), numberOfLinesToProcess, uniqueId);
     }
 
     private static void printHelp(JCommander jCommander, LogParserOptions... commands) {

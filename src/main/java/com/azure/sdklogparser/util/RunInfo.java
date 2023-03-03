@@ -3,7 +3,6 @@ package com.azure.sdklogparser.util;
 import com.microsoft.applicationinsights.telemetry.Telemetry;
 import com.microsoft.applicationinsights.telemetry.TraceTelemetry;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,10 +18,10 @@ public class RunInfo {
     private long linesRead = 0;
     private long linesReadInFile = 0;
 
-    public RunInfo(String runName, boolean dryRun, long maxLines) {
+    public RunInfo(String runName, boolean dryRun, long maxLines, String uniqueId) {
         this.runName = runName;
         this.dryRun = dryRun;
-        this.uniqueId = String.valueOf(Instant.now().getEpochSecond());
+        this.uniqueId = uniqueId;
         this.maxLines = maxLines;
     }
 
