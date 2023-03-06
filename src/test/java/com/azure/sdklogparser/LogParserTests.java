@@ -268,6 +268,7 @@ public class LogParserTests {
         final LogParser parser = new LogParser(telemetryClient, plainTextRunInfo, jsonLogParserOptions);
         // 2023-01-10 11:30:23.701  INFO 8001 --- [main] c.a.m.s.ServiceBusClientBuilder: # of open clients with shared connection: 1
         final Layout layout = Layout.fromString("<date> <time>  <level> <pid> --- [<thread>] <logger>          : <message>");
+
         final TestLogLine first = new TestLogLine().setTimestamp("2023-01-10 11:30:24.459").setLevel(Level.INFO)
                 .setLogger("c.a.c.a.i.handler.ConnectionHandler").setThread("ctor-executor-1")
                 .setMessage("onConnectionRemoteOpen");
@@ -444,6 +445,59 @@ public class LogParserTests {
             final String actualValue = actual.get(expectedKey);
             assertEquals(expectedValue, actualValue);
         });
+    }
+
+    /**
+     * Parse a json log.
+     */
+    @Test
+    public void parseJsonLog() throws IOException {
+        // Arrange
+        // Timestamp field is found in the "datetime" json property and similar for the message.
+        jsonLogParserOptions.setTimestamp("datetime");
+        jsonLogParserOptions.setMessageKey("msg");
+
+        final RunInfo run = new RunInfo("my-run-name", false, 100L, "my-unique-id");
+        final LogParser parser = new LogParser(telemetryClient, run, jsonLogParserOptions);
+
+        final TestLogLine first = new TestLogLine().setTimestamp("2022-12-01T10:16:12.001Z").setLevel(Level.INFO)
+                .setLogger("com.foo.BarLogger").setThread("partition-pump-1")
+                .setMessage("Customer log message");
+        final TestLogLine second = new TestLogLine().setTimestamp("2022-12-01T10:22:02.038Z").setLevel(Level.WARN)
+                .setLogger("c.a.c.a.i.RequestResponseChannel").setThread("reactor-executor-198")
+                .setMessage("Error in SendLinkHandler. Disposing unconfirmed sends.");
+        second.sdkMessageDetails.put("az.sdk.message", "Error in SendLinkHandler. Disposing unconfirmed sends.");
+        second.sdkMessageDetails.put("exception", "The connection was inactive for more than the allowed 300000 milliseconds and is closed by container 'LinkTracker'. TrackingId:f_G7, SystemTracker:gateway5, Timestamp:2022-12-01T10:22:02, errorContext[NAMESPACE: contoso.com. ERROR CONTEXT: N/A, PATH: $cbs, REFERENCE_ID: cbs:sender, LINK_CREDIT: 12]");
+        second.sdkMessageDetails.put("connectionId", "MF_0b9a58_1674924907030");
+        second.sdkMessageDetails.put("linkName", "cbs");
+        final TestLogLine third = new TestLogLine().setTimestamp("2022-12-01T10:53:19.093Z").setLevel(Level.ERROR)
+                .setLogger("reactor.core.primitive.Operators").setThread("parallel-3")
+                .setMessage("Operator called default onErrorDropped");
+
+        final List<TestLogLine> expectedLines = Arrays.asList(first, second, third);
+
+        // Act
+        InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("json.log");
+
+        assertNotNull(inputStream);
+
+        try (InputStreamReader inputStreamReader = new InputStreamReader(inputStream)) {
+            parser.parse(inputStreamReader, Layout.DEFAULT, true);
+        }
+
+        // Assert
+        verify(telemetryClient, atLeastOnce()).trackTrace(telemetryCaptor.capture());
+        verify(telemetryClient).flush();
+
+        final List<TraceTelemetry> allValues = telemetryCaptor.getAllValues();
+        assertEquals(expectedLines.size(), allValues.size());
+
+        for (int i = 0; i < expectedLines.size(); i++) {
+            final TestLogLine expected = expectedLines.get(i);
+            final TraceTelemetry actual = allValues.get(i);
+
+            assertLogLine(expected, actual);
+        }
     }
 
     private static void assertSeverityLevel(Level level, SeverityLevel actual) {
