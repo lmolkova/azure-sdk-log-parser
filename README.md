@@ -33,5 +33,6 @@ when specifying layout, add separator at the end. `date`, `time` and `level` are
 **Dry run, no data is sent**:
 `java -jar log-parser.jar plain -f c:\downloads\logs -d`
 
+### Json Log examples
 
-###
+See `java ./target/log-parser.jar --help` for all examples. 
