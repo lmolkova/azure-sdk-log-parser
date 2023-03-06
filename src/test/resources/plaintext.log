@@ -2,8 +2,7 @@
 2023-01-10 11:30:23.085  INFO 8001 --- [           main] bus.TestApplication            : No active profile set, falling back to 1 default profile: "default"
 2023-01-10 11:30:23.701  INFO 8001 --- [           main] c.a.m.s.ServiceBusClientBuilder          : # of open clients with shared connection: 1
 2023-01-10 11:30:24.459  INFO 8001 --- [ctor-executor-1] c.a.c.a.i.handler.ConnectionHandler      : {"az.sdk.message":"onConnectionRemoteOpen","connectionId":"MF_8a_16","hostName":"test-application.servicebus.windows.net","remoteContainer":"9de_G28"}
-2023-01-10 11:30:24.459  INFO 8001 --- [ctor-executor-1] c.a.m.s.i.ServiceBusConnectionProcessor  : {"az.sdk.message":"Channel is now active.","entityPath":"N/A"}
-2023-01-10 11:30:24.493  INFO 8001 --- [ctor-executor-1] c.a.c.a.i.handler.SessionHandler         : {"az.sdk.message":"onSessionRemoteOpen","connectionId":"MF_8a_16","sessionName":"payment-service-queue-local-session","sessionIncCapacity":0,"sessionOutgoingWindow":2147483647}
+2023-01-10 11:30:24.493  WARN 8001 --- [ctor-executor-3] c.a.c.a.i.handler.SessionHandler         : {"az.sdk.message":"onSessionRemoteOpen","connectionId":"MF_8a_16","sessionName":"test-queue-session","sessionIncCapacity":0,"sessionOutgoingWindow":2147483647}
 2022-11-14 10:42:45.048  INFO 8001 --- [ctor-executor-1] c.a.m.servicebus.LockRenewalOperation    : {"az.sdk.message":"Starting lock renewal.","isSession":true,"lockToken":"sessionId","nextExpiration":"2022-11-14T09:43:15.053Z","next":"PT30.004535S"}
 2023-01-10 11:30:24.534  INFO 8001 --- [ctor-executor-1] c.a.c.a.i.ReactorConnection              : {"az.sdk.message":"Emitting new response channel.","connectionId":"MF_8a_16","entityPath":"$cbs","linkName":"cbs"}
 2023-01-10 11:30:24.566  INFO 8001 --- [ctor-executor-1] c.a.c.a.i.handler.SendLinkHandler        : {"az.sdk.message":"onLinkRemoteOpen","connectionId":"MF_8a_16","linkName":"cbs:sender","entityPath":"$cbs","remoteTarget":"Target{address='$cbs', durable=NONE, expiryPolicy=SESSION_END, timeout=0, dynamic=false, dynamicNodeProperties=null, capabilities=null}"}
@@ -27,4 +26,4 @@ Caused by: com.azure.core.amqp.exception.AmqpException: connection aborted, erro
 	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635) ~[na:na]
 	at java.base/java.lang.Thread.run(Thread.java:833) ~[na:na]
 
-2022-11-14 10:45:09.286  INFO 8001 --- [ctor-executor-1] c.a.m.s.i.ServiceBusConnectionProcessor  : {"az.sdk.message":"Transient error occurred. Retrying.","exception":"connection aborted, errorContext[NAMESPACE: test-application.servicebus.windows.net. ERROR CONTEXT: N/A]","entityPath":"N/A","tryCount":0,"interval_ms":4511}
+2022-11-14 10:45:09.286  ERROR 8001 --- [ctor-executor-1] c.a.m.s.i.ServiceBusConnectionProcessor  : {"az.sdk.message":"Transient error occurred. Retrying.","exception":"connection aborted, errorContext[NAMESPACE: test-application.servicebus.windows.net. ERROR CONTEXT: N/A]","entityPath":"N/A","tryCount":0,"interval_ms":4511}

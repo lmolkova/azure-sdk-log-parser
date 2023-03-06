@@ -3,6 +3,7 @@ package com.azure.sdklogparser;
 import com.azure.sdklogparser.util.Layout;
 import com.azure.sdklogparser.util.RunInfo;
 import com.azure.sdklogparser.util.TokenType;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,12 +25,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static com.azure.sdklogparser.LogParser.ORIGINAL_MESSAGE_KEY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.atLeastOnce;
@@ -265,10 +268,51 @@ public class LogParserTests {
         final LogParser parser = new LogParser(telemetryClient, plainTextRunInfo, jsonLogParserOptions);
         // 2023-01-10 11:30:23.701  INFO 8001 --- [main] c.a.m.s.ServiceBusClientBuilder: # of open clients with shared connection: 1
         final Layout layout = Layout.fromString("<date> <time>  <level> <pid> --- [<thread>] <logger>          : <message>");
+        final TestLogLine first = new TestLogLine().setTimestamp("2023-01-10 11:30:24.459").setLevel(Level.INFO)
+                .setLogger("c.a.c.a.i.handler.ConnectionHandler").setThread("ctor-executor-1")
+                .setMessage("onConnectionRemoteOpen");
+        first.sdkMessageDetails.put("az.sdk.message", "onConnectionRemoteOpen");
+        first.sdkMessageDetails.put("connectionId", "MF_8a_16");
+        first.sdkMessageDetails.put("hostName", "test-application.servicebus.windows.net");
+        first.sdkMessageDetails.put("remoteContainer", "9de_G28");
+        final TestLogLine second = new TestLogLine().setTimestamp("2023-01-10 11:30:24.493").setLevel(Level.WARN)
+                .setLogger("c.a.c.a.i.handler.SessionHandler").setThread("ctor-executor-3")
+                .setMessage("onSessionRemoteOpen");
+        second.sdkMessageDetails.put("az.sdk.message", "onSessionRemoteOpen");
+        second.sdkMessageDetails.put("connectionId", "MF_8a_16");
+        second.sdkMessageDetails.put("sessionName", "test-queue-session");
+        second.sdkMessageDetails.put("sessionIncCapacity", "0");
+        second.sdkMessageDetails.put("sessionOutgoingWindow", "2147483647");
+
+        // Test the first few lines then the last one after the exception.
+        final List<TestLogLine> expectedLines = Arrays.asList(
+                new TestLogLine().setTimestamp("2023-01-10 11:30:23.084").setLevel(Level.INFO)
+                        .setLogger("bus.TestApplication").setThread("main")
+                        .setMessage("Starting TestApplication using Java 17.0.2"),
+                new TestLogLine().setTimestamp("2023-01-10 11:30:23.085").setLevel(Level.INFO)
+                        .setLogger("bus.TestApplication").setThread("main")
+                        .setMessage("No active profile set, falling back to 1 default profile: \"default\""),
+                new TestLogLine().setTimestamp("2023-01-10 11:30:23.701").setLevel(Level.INFO)
+                        .setLogger("c.a.m.s.ServiceBusClientBuilder").setThread("main")
+                        .setMessage("# of open clients with shared connection: 1"),
+                first, second);
+
+        // Last line after all the exceptions.
+        final TestLogLine last = new TestLogLine().setTimestamp("2022-11-14 10:45:09.286").setLevel(Level.ERROR)
+                .setLogger("c.a.m.s.i.ServiceBusConnectionProcessor").setThread("ctor-executor-1")
+                .setMessage("Transient error occurred. Retrying.");
+        last.sdkMessageDetails.put("az.sdk.message", "Transient error occurred. Retrying.");
+        last.sdkMessageDetails.put("exception", "connection aborted, errorContext[NAMESPACE: test-application.servicebus.windows.net. ERROR CONTEXT: N/A]");
+        last.sdkMessageDetails.put("entityPath", "N/A");
+        last.sdkMessageDetails.put("tryCount", "0");
+        last.sdkMessageDetails.put("interval_ms", "4511");
 
         // Act
-        try (InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("plaintext.log");
-             InputStreamReader inputStreamReader = new InputStreamReader(inputStream)) {
+        InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("plaintext.log");
+
+        assertNotNull(inputStream);
+
+        try (InputStreamReader inputStreamReader = new InputStreamReader(inputStream)) {
             parser.parse(inputStreamReader, layout, false);
         }
 
@@ -278,7 +322,18 @@ public class LogParserTests {
 
         final List<TraceTelemetry> allValues = telemetryCaptor.getAllValues();
 
-        assertEquals(28, allValues.size());
+        assertEquals(10, allValues.size());
+
+        for (int i = 0; i < expectedLines.size(); i++) {
+            final TestLogLine expected = expectedLines.get(i);
+            final TraceTelemetry actual = allValues.get(i);
+
+            assertLogLine(expected, actual);
+        }
+
+        // Assert last log line after the exceptions.
+        final TraceTelemetry lastActual = allValues.get(allValues.size() - 1);
+        assertLogLine(last, lastActual);
     }
 
     /**
@@ -391,55 +446,99 @@ public class LogParserTests {
         });
     }
 
+    private static void assertSeverityLevel(Level level, SeverityLevel actual) {
+        switch (level) {
+            case ERROR:
+                assertEquals(SeverityLevel.Error, actual);
+                return;
+            case INFO:
+                assertEquals(SeverityLevel.Information, actual);
+                return;
+            case WARN:
+                assertEquals(SeverityLevel.Warning, actual);
+                return;
+            case DEBUG:
+            case TRACE:
+            default:
+                assertEquals(SeverityLevel.Verbose, actual);
+        }
+    }
+
+    private static void assertLogLine(TestLogLine expected, TraceTelemetry actual) {
+        assertEquals(expected.getMessage(), actual.getMessage());
+        assertSeverityLevel(expected.getLevel(), actual.getSeverityLevel());
+
+        assertEquals(expected.getLogger(), actual.getProperties().get(TokenType.LOGGER.getValue()));
+        assertEquals(expected.getThread(), actual.getProperties().get(TokenType.THREAD.getValue()));
+        assertEquals(expected.getTimestamp(), actual.getProperties().get(TokenType.TIMESTAMP.getValue()));
+
+        expected.sdkMessageDetails.forEach((key, expectedValue) -> {
+            assertTrue(actual.getProperties().containsKey(key), "Did not contain key: " + key);
+            assertEquals(expectedValue, actual.getProperties().get(key));
+        });
+    }
+
     /**
      * A possible user log line. Names of fields default from {@link TokenType}.
      */
     private static final class TestLogLine {
+        @JsonProperty
         private String logger;
+        @JsonProperty
         private String timestamp;
+        @JsonProperty
         private Level level;
+        @JsonProperty
         private String thread;
-
+        @JsonProperty
         private String message;
+
+        @JsonIgnore
+        private final Map<String, String> sdkMessageDetails = new HashMap<>();
 
         public String getLogger() {
             return logger;
         }
 
-        public void setLogger(String logger) {
+        public TestLogLine setLogger(String logger) {
             this.logger = logger;
+            return this;
         }
 
         public String getTimestamp() {
             return timestamp;
         }
 
-        public void setTimestamp(String timestamp) {
+        public TestLogLine setTimestamp(String timestamp) {
             this.timestamp = timestamp;
+            return this;
         }
 
         public Level getLevel() {
             return level;
         }
 
-        public void setLevel(Level level) {
+        public TestLogLine setLevel(Level level) {
             this.level = level;
+            return this;
         }
 
         public String getThread() {
             return thread;
         }
 
-        public void setThread(String thread) {
+        public TestLogLine setThread(String thread) {
             this.thread = thread;
+            return this;
         }
 
         public String getMessage() {
             return message;
         }
 
-        public void setMessage(String message) {
+        public TestLogLine setMessage(String message) {
             this.message = message;
+            return this;
         }
     }
 
