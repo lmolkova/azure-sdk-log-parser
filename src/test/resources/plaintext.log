@@ -1,0 +1,29 @@
+2023-01-10 11:30:23.084  INFO 8001 --- [           main] bus.TestApplication            : Starting TestApplication using Java 17.0.2
+2023-01-10 11:30:23.085  INFO 8001 --- [           main] bus.TestApplication            : No active profile set, falling back to 1 default profile: "default"
+2023-01-10 11:30:23.701  INFO 8001 --- [           main] c.a.m.s.ServiceBusClientBuilder          : # of open clients with shared connection: 1
+2023-01-10 11:30:24.459  INFO 8001 --- [ctor-executor-1] c.a.c.a.i.handler.ConnectionHandler      : {"az.sdk.message":"onConnectionRemoteOpen","connectionId":"MF_8a_16","hostName":"test-application.servicebus.windows.net","remoteContainer":"9de_G28"}
+2023-01-10 11:30:24.493  WARN 8001 --- [ctor-executor-3] c.a.c.a.i.handler.SessionHandler         : {"az.sdk.message":"onSessionRemoteOpen","connectionId":"MF_8a_16","sessionName":"test-queue-session","sessionIncCapacity":0,"sessionOutgoingWindow":2147483647}
+2022-11-14 10:42:45.048  INFO 8001 --- [ctor-executor-1] c.a.m.servicebus.LockRenewalOperation    : {"az.sdk.message":"Starting lock renewal.","isSession":true,"lockToken":"sessionId","nextExpiration":"2022-11-14T09:43:15.053Z","next":"PT30.004535S"}
+2023-01-10 11:30:24.534  INFO 8001 --- [ctor-executor-1] c.a.c.a.i.ReactorConnection              : {"az.sdk.message":"Emitting new response channel.","connectionId":"MF_8a_16","entityPath":"$cbs","linkName":"cbs"}
+2023-01-10 11:30:24.566  INFO 8001 --- [ctor-executor-1] c.a.c.a.i.handler.SendLinkHandler        : {"az.sdk.message":"onLinkRemoteOpen","connectionId":"MF_8a_16","linkName":"cbs:sender","entityPath":"$cbs","remoteTarget":"Target{address='$cbs', durable=NONE, expiryPolicy=SESSION_END, timeout=0, dynamic=false, dynamicNodeProperties=null, capabilities=null}"}
+2022-11-14 10:45:05.235  WARN 8001 --- [ctor-executor-1] c.a.c.a.i.handler.ConnectionHandler      : {"az.sdk.message":"onTransportError","connectionId":"MF_8a_16","errorCondition":"amqp:connection:framing-error","errorDescription":"connection aborted","hostName":"test-application.servicebus.windows.net"}
+
+reactor.core.Exceptions$ErrorCallbackNotImplemented: com.azure.core.amqp.exception.AmqpException: connection aborted, errorContext[NAMESPACE: test-application.servicebus.windows.net. ERROR CONTEXT: N/A]
+Caused by: com.azure.core.amqp.exception.AmqpException: connection aborted, errorContext[NAMESPACE: test-application.servicebus.windows.net. ERROR CONTEXT: N/A]
+	at com.azure.core.amqp.implementation.ExceptionUtil.toException(ExceptionUtil.java:85) ~[azure-core-amqp-2.7.2.jar:2.7.2]
+	at com.azure.core.amqp.implementation.handler.ConnectionHandler.notifyErrorContext(ConnectionHandler.java:351) ~[azure-core-amqp-2.7.2.jar:2.7.2]
+	at com.azure.core.amqp.implementation.handler.ConnectionHandler.onTransportError(ConnectionHandler.java:253) ~[azure-core-amqp-2.7.2.jar:2.7.2]
+	at org.apache.qpid.proton.engine.BaseHandler.handle(BaseHandler.java:191) ~[proton-j-0.33.8.jar:na]
+	at org.apache.qpid.proton.engine.impl.EventImpl.dispatch(EventImpl.java:108) ~[proton-j-0.33.8.jar:na]
+	at org.apache.qpid.proton.reactor.impl.ReactorImpl.dispatch(ReactorImpl.java:324) ~[proton-j-0.33.8.jar:na]
+	at org.apache.qpid.proton.reactor.impl.ReactorImpl.process(ReactorImpl.java:291) ~[proton-j-0.33.8.jar:na]
+	at com.azure.core.amqp.implementation.ReactorExecutor.run(ReactorExecutor.java:91) ~[azure-core-amqp-2.7.2.jar:2.7.2]
+	at reactor.core.scheduler.SchedulerTask.call(SchedulerTask.java:68) ~[reactor-core-3.4.17.jar:3.4.17]
+	at reactor.core.scheduler.SchedulerTask.call(SchedulerTask.java:28) ~[reactor-core-3.4.17.jar:3.4.17]
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264) ~[na:na]
+	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:304) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136) ~[na:na]
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635) ~[na:na]
+	at java.base/java.lang.Thread.run(Thread.java:833) ~[na:na]
+
+2022-11-14 10:45:09.286  ERROR 8001 --- [ctor-executor-1] c.a.m.s.i.ServiceBusConnectionProcessor  : {"az.sdk.message":"Transient error occurred. Retrying.","exception":"connection aborted, errorContext[NAMESPACE: test-application.servicebus.windows.net. ERROR CONTEXT: N/A]","entityPath":"N/A","tryCount":0,"interval_ms":4511}

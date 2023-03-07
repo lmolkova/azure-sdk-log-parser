@@ -1,13 +1,14 @@
 package com.azure.sdklogparser;
 
 import com.azure.sdklogparser.util.ArchiveHelper;
-import com.azure.sdklogparser.util.Layout;
+import com.azure.sdklogparser.util.ConsoleTelemetryClient;
 import com.azure.sdklogparser.util.RunInfo;
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.DefaultParser;
-import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.ParameterException;
+import com.microsoft.applicationinsights.TelemetryClient;
+import com.microsoft.applicationinsights.TelemetryConfiguration;
+import com.microsoft.applicationinsights.channel.concrete.inprocess.InProcessTelemetryChannel;
+import com.microsoft.applicationinsights.extensibility.TelemetryInitializer;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 
@@ -15,99 +16,142 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Objects;
 
 public class LogParserApp {
 
-    public static void main(String[] args) throws IOException, ParseException {
-
-        var helpFormatter = new HelpFormatter();
-        helpFormatter.setOptionComparator(null);
-        helpFormatter.setWidth(256);
-
-        String example = "Example 1 (custom log layout): java -jar log-parser.jar -f c:\\downloads\\logs.zip -l \"<date> <time> <level> [<thread>] <class> - \" -c InstrumentationKey=secret;IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/\n";
-        example += "Example 2 (default layout, print parsed logs): java -jar -Dorg.slf4j.simpleLogger.defaultLogLevel=debug log-parser.jar  -f c:\\downloads\\logs.log -c InstrumentationKey=secret;IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/\n";
-        example += "    when specifying layout, add separator at the end. <date>, <time> and <level> are magic words, other fields are arbitrary.\n";
-        example += "Example 3 (dry run, will print all parsed logs): java -jar log-parser.jar -f c:\\downloads\\logs -d\n\n";
-
-        Options options = new Options();
-
-        // we can support archived tar.gz, zip
-        // we can support other sources: blob
-        options.addRequiredOption("f", "file", true, "REQUIRED. Log file (directory or zip archive) name");
-        options.addOption("l",  "layout", true, "log layout, defaults to \"<date> <time> <level> <thread> <class> \". Message is the last one and not specified in the layout.");
-        options.addOption("d", "dry-run", false, "dry run, when set, does nto send data to Log Analytics and parses first 2 lines of each file");
-        options.addOption("r", "run-id", true, "Name to identify this run, by default fileName is used. Parser will add unique id.");
-        options.addOption("c", "connection-string", true, "Azure Monitor connection string (or pass it in APPLICATIONINSIGHTS_CONNECTION_STRING env var). If not set, it will be a dry-run");
-        options.addOption("z", "unzip", false, "Unzip file before processing (will be done if file extension is 'zip')");
-        options.addOption("m", "max-lines-per-file", true, "Max lines to print, none by default");
-        options.addOption("h", "help", false, "Print help");
-
-
+    public static void main(String[] args) {
         // -l "<date> <time> <level> [<thread>] <class> - "
+        final PlaintextLogParserOptions plainTextCommand = new PlaintextLogParserOptions();
+        final JsonLogParserOptions jsonCommand = new JsonLogParserOptions();
 
-        var parser = new DefaultParser();
-        CommandLine cmd;
+        final JCommander jCommander = JCommander.newBuilder()
+                .addCommand(PlaintextLogParserOptions.COMMAND_NAME, plainTextCommand)
+                .addCommand(JsonLogParserOptions.COMMAND_NAME, jsonCommand)
+                .build();
+        jCommander.setProgramName("log-parser");
+
         try {
-            cmd = parser.parse(options, args);
-        } catch (ParseException ex) {
-            helpFormatter.printHelp("log-parser", example, options, null, true);
-            throw ex;
-        }
+            jCommander.parse(args);
+        } catch (ParameterException e) {
+            System.err.println(e.getLocalizedMessage());
+            System.err.println();
 
-        if (cmd.hasOption("h")) {
-            helpFormatter.printHelp("log-parser", example, options, null, true);
+            printHelp(jCommander, plainTextCommand, jsonCommand);
             return;
         }
 
-        if (!cmd.hasOption("f")) {
-            helpFormatter.printHelp("log-parser", example, options, null, true);
+        final String command = jCommander.getParsedCommand();
+
+        final LogParserOptions optionsToUse;
+        if (PlaintextLogParserOptions.COMMAND_NAME.equalsIgnoreCase(command)) {
+            if (plainTextCommand.isPrintHelp()) {
+                printHelp(jCommander, plainTextCommand, jsonCommand);
+                return;
+            }
+
+            optionsToUse = plainTextCommand;
+        } else if (JsonLogParserOptions.COMMAND_NAME.equalsIgnoreCase(command)) {
+            if (jsonCommand.isPrintHelp()) {
+                printHelp(jCommander, plainTextCommand, jsonCommand);
+                return;
+            }
+
+            optionsToUse = jsonCommand;
+        } else {
+            System.out.println("Arguments did not match any command sets.");
+            printHelp(jCommander, plainTextCommand, jsonCommand);
             return;
         }
 
-
-        var fileName = cmd.getOptionValue("f");
-        var connectionString = cmd.hasOption("c") ?  cmd.getOptionValue("c") :  System.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING");
-        var runIdPrefix = cmd.hasOption("r") ? cmd.getOptionValue("r") : Paths.get(fileName).getFileName().toString();
-        var dryRun = cmd.hasOption("d");
-        if (connectionString == null && !dryRun) {
-            System.out.println("Connection string is missing, making it a dry-run");
-            dryRun = true;
+        if (optionsToUse.getConnectionString() == null) {
+            System.out.println("Connection string is missing, making it a dry-run.");
+            optionsToUse.setIsDryRun(true);
         }
 
-        String maxLinesPerFileStr = cmd.getOptionValue("m");
-        long maxLinesPerFile = dryRun ? 3 : Long.MAX_VALUE;
-        if (maxLinesPerFileStr != null) {
-            maxLinesPerFile = Long.parseLong(maxLinesPerFileStr);
-        }
+        final boolean isJson = optionsToUse instanceof JsonLogParserOptions;
+        final RunInfo runInformation = getRunInformation(optionsToUse);
+        final TelemetryClient telemetryClient = getTelemetryClient(optionsToUse, runInformation);
+        final Path pathToFile = getPathAndUnzipIfNeeded(optionsToUse.getFileOrDirectory(), optionsToUse.unzipFile());
 
-        var layout = cmd.hasOption("l") ? Layout.fromString(cmd.getOptionValue("l")) : Layout.DEFAULT;
-
-        Path pathToFile = getPathAndUnzipIfNeeded(fileName, cmd.hasOption("z"));
-
-        RunInfo run = new RunInfo(runIdPrefix, dryRun, maxLinesPerFile);
-        var logParser = new LogParser(connectionString, run);
+        final LogParser logParser = new LogParser(telemetryClient, runInformation, jsonCommand);
 
         for (var file : listFiles(pathToFile)) {
-            run.nextFile(file.getAbsolutePath());
+            runInformation.nextFile(file.getAbsolutePath());
             try (var fileReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
-                logParser.parse(fileReader, layout);
+                logParser.parse(fileReader, plainTextCommand.getLayout(), isJson);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Unable to read file: " + file, e);
             }
         }
 
-        run.printRunSummary();
+        runInformation.printRunSummary();
     }
 
-    private static Path getPathAndUnzipIfNeeded(String fileName, boolean unzip) throws IOException {
+    private static TelemetryClient getTelemetryClient(LogParserOptions options, RunInfo runInfo) {
+        final TelemetryClient telemetryClient;
+        if (options.isDryRun()) {
+            telemetryClient = new ConsoleTelemetryClient();
+        } else {
+            TelemetryConfiguration config = new TelemetryConfiguration();
+            TelemetryInitializer initializer = telemetry -> {
+                telemetry.getContext().getCloud().setRole(runInfo.getRunName());
+                telemetry.getContext().getCloud().setRoleInstance(runInfo.getUniqueId());
+            };
+
+            config.getTelemetryInitializers().add(initializer);
+            config.setConnectionString(Objects.requireNonNull(options.getConnectionString()));
+            config.setChannel(new InProcessTelemetryChannel(config));
+
+            telemetryClient = new TelemetryClient(config);
+        }
+
+        return telemetryClient;
+    }
+
+    private static RunInfo getRunInformation(LogParserOptions options) {
+        final String fileName = options.getFileOrDirectory();
+        final String runIdPrefix = options.getRunId() != null
+                ? options.getRunId()
+                : Paths.get(fileName).getFileName().toString();
+
+        final long numberOfLinesToProcess = options.isDryRun() ? options.getMaxLinesPerFile() : Long.MAX_VALUE;
+        final String uniqueId = String.valueOf(Instant.now().getEpochSecond());
+
+        return new RunInfo(runIdPrefix, options.isDryRun(), numberOfLinesToProcess, uniqueId);
+    }
+
+    private static void printHelp(JCommander jCommander, LogParserOptions... commands) {
+        jCommander.usage();
+
+        jCommander.getConsole().println(PlaintextLogParserOptions.getSupportedParameters());
+        jCommander.getConsole().println("--------- EXAMPLES ---------\n\n");
+
+        Arrays.stream(commands).forEach(option -> {
+            jCommander.getConsole().println(option.getName() + " EXAMPLES\n");
+            jCommander.getConsole().println(option.getExamples());
+        });
+    }
+
+    private static Path getPathAndUnzipIfNeeded(String fileName, boolean unzip) {
         Path pathToFile = Paths.get(fileName);
         if (unzip || FilenameUtils.getExtension(fileName).equals("zip")) {
-            pathToFile = Files.createTempDirectory(null);
-            if (!ArchiveHelper.unzip(fileName, pathToFile.toString())){
+            try {
+                pathToFile = Files.createTempDirectory(null);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Unable to create temporary file directory.", e);
+            }
+
+            if (!ArchiveHelper.unzip(fileName, pathToFile.toString())) {
                 System.out.println("Error: can't unzip " + fileName);
                 System.exit(1);
             }
@@ -120,7 +164,7 @@ public class LogParserApp {
         if (Files.isDirectory(pathToFile)) {
             return FileUtils.listFiles(
                     pathToFile.toFile(),
-                    new String[] {"log"},
+                    new String[]{"log"},
                     true);
         }
 

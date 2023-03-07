@@ -1,24 +1,12 @@
 package com.azure.sdklogparser.util;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.microsoft.applicationinsights.telemetry.Telemetry;
 import com.microsoft.applicationinsights.telemetry.TraceTelemetry;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.simple.SimpleLogger;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 public class RunInfo {
-    private static final long MAX_DRY_RUN_LINES = 10;
-    private final Logger logger = LoggerFactory.getLogger(RunInfo.class);
-    private final ObjectMapper prettyPrinter = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private final String runName;
     private final String uniqueId;
     private final boolean dryRun;
@@ -30,11 +18,10 @@ public class RunInfo {
     private long linesRead = 0;
     private long linesReadInFile = 0;
 
-
-    public RunInfo(String runName, boolean dryRun, long maxLines) {
+    public RunInfo(String runName, boolean dryRun, long maxLines, String uniqueId) {
         this.runName = runName;
         this.dryRun = dryRun;
-        this.uniqueId = String.valueOf(Instant.now().getEpochSecond());
+        this.uniqueId = uniqueId;
         this.maxLines = maxLines;
     }
 
@@ -65,39 +52,30 @@ public class RunInfo {
             return;
         }
 
-        var timestamp = logRecord.getProperties().get("timestamp");
-        if (timestamp.compareTo(minTimestamp) < 0)  {
-            minTimestamp = timestamp;
-        }
+        var timestamp = logRecord.getProperties().get(TokenType.TIMESTAMP.getValue());
+        if (timestamp != null) {
+            if (timestamp.compareTo(minTimestamp) < 0) {
+                minTimestamp = timestamp;
+            }
 
-        if (timestamp.compareTo(maxTimestamp) > 0) {
-            maxTimestamp = timestamp;
-        }
-
-        linesRead ++;
-        linesReadInFile ++;
-
-        if (dryRun || logger.isDebugEnabled()) {
-                // add debug info
-                Map<String, String> output = new TreeMap<>(logRecord.getProperties());
-                output.put("level", ((TraceTelemetry) logRecord).getSeverityLevel().name());
-                output.put("message", ((TraceTelemetry) logRecord).getMessage());
-            try {
-                if (dryRun) {
-                    System.out.println(prettyPrinter.writeValueAsString(output));
-                } else if (logger.isDebugEnabled()) {
-                    logger.debug(prettyPrinter.writeValueAsString(output));
-                }
-            } catch (JsonProcessingException e) {
-                e.printStackTrace();
+            if (timestamp.compareTo(maxTimestamp) > 0) {
+                maxTimestamp = timestamp;
             }
         }
+
+        linesRead++;
+        linesReadInFile++;
     }
 
     public void printRunSummary() {
-        System.out.printf("----------------------\nParsed %d log records, min timestamp: '%s', max timestamp: %s\n", linesRead, minTimestamp, maxTimestamp);
-        System.out.printf("Query all logs:\n" +
-                "\ttraces | where cloud_RoleInstance  == \"%s\" and cloud_RoleName == \"%s\"\n", runName, uniqueId);
+        System.out.printf("----------------------\nParsed %d log records, min timestamp: '%s', max timestamp: %s%n",
+                linesRead, minTimestamp, maxTimestamp);
+
+        System.out.printf("Query all Azure SDK logs and expand properties:\n" +
+                "\ttraces | where cloud_RoleInstance  == \"%s\" and cloud_RoleName == \"%s\"%n"
+                + "| where isnotnull(customDimensions[\"az.sdk.message\"])%n"
+                + "| evaluate bag_unpack(customDimensions)\n"
+                + "| sort by tolong(\"line\"), tostring(\"connectionId\") asc\n", uniqueId, runName);
 
     }
 }
