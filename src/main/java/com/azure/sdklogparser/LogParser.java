@@ -1,5 +1,6 @@
 package com.azure.sdklogparser;
 
+import com.azure.sdklogparser.util.FileFormat;
 import com.azure.sdklogparser.util.Layout;
 import com.azure.sdklogparser.util.RunInfo;
 import com.azure.sdklogparser.util.Token;
@@ -12,6 +13,9 @@ import com.microsoft.applicationinsights.TelemetryClient;
 import com.microsoft.applicationinsights.extensibility.context.CloudContext;
 import com.microsoft.applicationinsights.telemetry.SeverityLevel;
 import com.microsoft.applicationinsights.telemetry.TraceTelemetry;
+import com.opencsv.CSVParser;
+import com.opencsv.CSVReader;
+import com.opencsv.exceptions.CsvValidationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,6 +30,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class LogParser {
+    public static final String TIMESTAMP_CUSTOM_DIMENSION = "original_timestamp";
     private static final Logger LOGGER = LoggerFactory.getLogger(LogParser.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final TypeReference<HashMap<String, Object>> TYPE_REFERENCE = new TypeReference<>() {
@@ -60,13 +65,32 @@ public class LogParser {
         this.runInfo = runInfo;
     }
 
-    public void parse(InputStreamReader text, Layout layout, boolean isJson) throws IOException {
+    public void parse(InputStreamReader text, Layout layout, FileFormat format) throws IOException {
         long fileLineNumber = 0;
         try (BufferedReader br = new BufferedReader(text)) {
-            String line;
-            while (runInfo.shouldKeepGoing() && (line = br.readLine()) != null) {
-                processLine(isJson, line, fileLineNumber, layout);
-                fileLineNumber++;
+            if (format == FileFormat.JSON || format == FileFormat.PLAIN) {
+                String line;
+                while (runInfo.shouldKeepGoing() && (line = br.readLine()) != null) {
+                    processLine(format, line, fileLineNumber, layout);
+                    fileLineNumber++;
+                }
+            } else if (format == FileFormat.CSV) {
+                try (CSVReader csvReader = new CSVReader(br)) {
+                    String[] line;
+                    while (runInfo.shouldKeepGoing()) {
+                        try {
+                            line = csvReader.readNext();
+                            if (line == null) {
+                                break;
+                            }
+                            processCsvLine(line, csvReader.getLinesRead(), layout);
+                        } catch (CsvValidationException e) {
+                            LOGGER.warn("Could not get the next csv line.", e);
+                        }
+                    }
+
+                    fileLineNumber = csvReader.getLinesRead();
+                }
             }
 
             if (fileLineNumber == 0) {
@@ -77,13 +101,17 @@ public class LogParser {
         }
     }
 
-    void processLine(boolean isJson, String prevLine, long fileLineNumber, Layout layout) {
+    void processLine(FileFormat format, String prevLine, long fileLineNumber, Layout layout) {
         TraceTelemetry telemetry = null;
         try {
-            if (isJson) {
-                telemetry = parseLine(prevLine, fileLineNumber, jsonLogParserOptions);
-            } else {
-                telemetry = parseLine(prevLine, fileLineNumber, layout);
+            switch (format) {
+                case JSON:
+                    telemetry = parseLine(prevLine, fileLineNumber, jsonLogParserOptions);
+                    break;
+                case PLAIN:
+                    telemetry = parseLine(prevLine, fileLineNumber, layout);
+                    break;
+                default:
             }
         } finally {
             if (telemetry != null) {
@@ -125,13 +153,83 @@ public class LogParser {
         }
 
         // Go through and remap the known parameters into consistent key names.
-        remapParameter(TokenType.TIMESTAMP, options.getTimestamp(), properties);
-        remapParameter(TokenType.LOGGER, options.getLogger(), properties);
-        remapParameter(TokenType.THREAD, options.getThread(), properties);
+        remapParameter(TIMESTAMP_CUSTOM_DIMENSION, options.getTimestamp(), properties);
+        remapParameter(TokenType.LOGGER.getValue(), options.getLogger(), properties);
+        remapParameter(TokenType.THREAD.getValue(), options.getThread(), properties);
 
         properties.forEach((key, value) -> telemetry.getProperties().put(key, value != null ? value.toString() : NULL));
 
         return telemetry;
+    }
+
+    void processCsvLine(String[] fields, long fileLineNumber, Layout layout) {
+        final TraceTelemetry telemetry = new TraceTelemetry();
+        final List<Token> layoutTokens = layout.getTokens();
+        if (fields.length < layoutTokens.size()) {
+            LOGGER.info("Log line  does not match layout. Found fields - '{}'", String.join(",", fields));
+        }
+        String dateStr = null;
+        String timeStr = null;
+        String timestampStr = null;
+        String sdkMessage = null;
+
+        for (int i = 0; i < layoutTokens.size() && i < fields.length; i++) {
+
+            final Token next = layoutTokens.get(i);
+
+            final String key = next.getName().trim();
+            final String value = fields[i].trim();
+            final TokenType tokenType = TokenType.fromString(key);
+
+            if (tokenType == null) {
+                telemetry.getProperties().putIfAbsent(key, value);
+            } else {
+                switch (tokenType) {
+                    case DATE:
+                        dateStr = value;
+                        break;
+                    case TIME:
+                        timeStr = value;
+                        break;
+                    case TIMESTAMP:
+                        timestampStr = value;
+                        break;
+                    case LOG_LEVEL:
+                        final SeverityLevel severityLevel = getSeverity(value);
+                        telemetry.setSeverityLevel(severityLevel);
+                        break;
+                    case MESSAGE:
+                        sdkMessage = value;
+                        break;
+                    default:
+                        telemetry.getProperties().putIfAbsent(key, value);
+                }
+            }
+        }
+
+        if (runInfo.isDryRun() || LOGGER.isDebugEnabled()) {
+            telemetry.getProperties().put(ORIGINAL_MESSAGE_KEY, String.join(",", fields));
+        }
+
+        // LogAnalytics/AppInsights doesn't like timestamps in the past, so we'll put them in the custom dimension
+        final Map<String, String> customProperties = telemetry.getProperties();
+
+        // If they didn't have a timestamp field in their layout, we'll create one from the combination of date
+        // and time.
+        if (timestampStr == null) {
+            timestampStr = dateStr == null ? timeStr : dateStr + " " + timeStr;
+        }
+        customProperties.put(TIMESTAMP_CUSTOM_DIMENSION, timestampStr);
+        customProperties.put(TokenType.LINE.getValue(), String.valueOf(fileLineNumber));
+
+        try {
+            parseSdkMessage(telemetry, sdkMessage);
+        } catch (JsonProcessingException e) {
+            LOGGER.info("Could not parse SDK message as CSV object. message[{}]", sdkMessage);
+        }
+
+        telemetryClient.trackTrace(telemetry);
+        runInfo.nextRecord(telemetry);
     }
 
     TraceTelemetry parseLine(String line, long fileLineNumber, Layout layout) {
@@ -141,12 +239,12 @@ public class LogParser {
         String dateStr = null;
         String timeStr = null;
         String timestampStr = null;
-        int ind = 0;
         String sdkMessage = null;
 
         final List<Token> layoutTokens = layout.getTokens();
         final int lastIndex = layoutTokens.size() - 1;
 
+        int ind = layout.getStartIndex();
         for (int i = 0; i < layoutTokens.size(); i++) {
             final Token next = layoutTokens.get(i);
             final boolean isLastToken = i == lastIndex;
@@ -176,6 +274,7 @@ public class LogParser {
                         break;
                     case TIMESTAMP:
                         timestampStr = value;
+                        break;
                     case LOG_LEVEL:
                         final SeverityLevel severityLevel = getSeverity(value);
                         telemetry.setSeverityLevel(severityLevel);
@@ -202,9 +301,9 @@ public class LogParser {
         // If they didn't have a timestamp field in their layout, we'll create one from the combination of date
         // and time.
         if (timestampStr == null) {
-            timestampStr = dateStr + " " + timeStr;
+            timestampStr = dateStr == null ? timeStr : dateStr + " " + timeStr;
         }
-        customProperties.put(TokenType.TIMESTAMP.getValue(), timestampStr);
+        customProperties.put(TIMESTAMP_CUSTOM_DIMENSION, timestampStr);
         customProperties.put(TokenType.LINE.getValue(), String.valueOf(fileLineNumber));
 
         try {
@@ -226,7 +325,7 @@ public class LogParser {
      * @throws JsonProcessingException If it was unable to parse the message into a JSON object.
      */
     void parseSdkMessage(TraceTelemetry telemetry, String message) throws JsonProcessingException {
-        HashMap<String, Object> properties;
+        HashMap<String, Object> properties = null;
         try {
             properties = OBJECT_MAPPER.readValue(message, TYPE_REFERENCE);
         } catch (JsonProcessingException e) {
@@ -260,8 +359,8 @@ public class LogParser {
         telemetry.setMessage(value != null ? value.toString() : message);
     }
 
-    private static void remapParameter(TokenType expectedKey, String actualKey, Map<String, Object> map) {
-        if (expectedKey.getValue().equals(actualKey)) {
+    private static void remapParameter(String expectedKey, String actualKey, Map<String, Object> map) {
+        if (expectedKey.equals(actualKey)) {
             return;
         }
 
@@ -271,7 +370,7 @@ public class LogParser {
 
         final Object removed = map.remove(actualKey);
 
-        map.put(expectedKey.getValue(), removed);
+        map.put(expectedKey, removed);
     }
 
     private static SeverityLevel getSeverity(String value) {
