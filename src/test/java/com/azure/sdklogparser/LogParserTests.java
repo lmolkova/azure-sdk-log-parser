@@ -1,5 +1,6 @@
 package com.azure.sdklogparser;
 
+import com.azure.sdklogparser.util.FileFormat;
 import com.azure.sdklogparser.util.Layout;
 import com.azure.sdklogparser.util.RunInfo;
 import com.azure.sdklogparser.util.TokenType;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 import static com.azure.sdklogparser.LogParser.ORIGINAL_MESSAGE_KEY;
+import static com.azure.sdklogparser.LogParser.TIMESTAMP_CUSTOM_DIMENSION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -184,7 +186,7 @@ public class LogParserTests {
 
         final long lineNumber = 10;
         final Layout layout = Layout.fromString("[<timestamp>] (<level>) (<thread>) <logger> <custom> ");
-        final String message = "[2021-10-01 06:31:57,637] (WARN) (reactor-executor-1) c.a.m.ClientLogger customValue "
+        final String message = "[2021-10-01 06:31:10,637] (WARN) (reactor-executor-1) c.a.m.ClientLogger customValue "
                 + sdkMessageJson;
 
         // Act
@@ -199,11 +201,10 @@ public class LogParserTests {
 
         assertEquals(String.valueOf(lineNumber), actual.remove(TokenType.LINE.getValue()));
 
-        assertEquals("[2021-10-01 06:31:57,637", actual.remove(TokenType.TIMESTAMP.getValue()));
-        ;
         assertEquals("reactor-executor-1", actual.remove(TokenType.THREAD.getValue()));
         assertEquals("c.a.m.ClientLogger", actual.remove(TokenType.LOGGER.getValue()));
         assertEquals("customValue", actual.remove("custom"));
+        assertEquals("2021-10-01 06:31:10,637", actual.remove(TIMESTAMP_CUSTOM_DIMENSION));
 
         // See what is left over.
         assertEquals(sdkMessageMap.size(), actual.size());
@@ -217,6 +218,30 @@ public class LogParserTests {
     }
 
     /**
+     * Tests that it can parse a line with times specified and since dry-run is false, does not have
+     * "original-line".
+     */
+    @Test
+    public void parsePlaintextLayoutTimeOnly() {
+        // Arrange
+        final RunInfo nonDryRun = new RunInfo("foo-bar", false, 15L, UNIQUE_ID);
+        final LogParser parser = new LogParser(telemetryClient, nonDryRun, jsonLogParserOptions);
+
+        final Layout layout = Layout.fromString("<time> (<level>) (<thread>) <logger> <custom> ");
+        final String message = "06:31:10,637 (WARN) (reactor-executor-1) c.a.m.ClientLogger customValue "
+                + sdkMessageJson;
+
+        // Act
+        final TraceTelemetry actualTelemetry = parser.parseLine(message, 10, layout);
+
+        // Assert
+        assertEquals("06:31:10,637", actualTelemetry.getProperties().get(TIMESTAMP_CUSTOM_DIMENSION));
+        assertEquals("reactor-executor-1", actualTelemetry.getProperties().get(TokenType.THREAD.getValue()));
+        assertEquals("c.a.m.ClientLogger", actualTelemetry.getProperties().get(TokenType.LOGGER.getValue()));
+        assertEquals("customValue", actualTelemetry.getProperties().get("custom"));
+    }
+
+    /**
      * Tests that it can parse a line with date and time layout.
      */
     @Test
@@ -226,7 +251,7 @@ public class LogParserTests {
 
         final long lineNumber = 10;
         final Layout layout = Layout.fromString("[<date> - <time>] (<level>) <logger>: <message>");
-        final String message = "[2022-12-10 - 06:31:10] (ERROR) c.a.m.ClientLogger: " + sdkMessageJson;
+        final String message = "[2022-12-10 - 06:31:10,637] (ERROR) c.a.m.ClientLogger: " + sdkMessageJson;
 
         // Act
         final TraceTelemetry actualTelemetry = parser.parseLine(message, lineNumber, layout);
@@ -243,9 +268,8 @@ public class LogParserTests {
         // dryRun = true, so we have the original message
         assertEquals(message, actual.remove(ORIGINAL_MESSAGE_KEY));
 
-        assertEquals("[2022-12-10 06:31:10", actual.remove(TokenType.TIMESTAMP.getValue()));
-        ;
         assertEquals("c.a.m.ClientLogger", actual.remove(TokenType.LOGGER.getValue()));
+        assertEquals("2022-12-10 06:31:10,637", actual.remove(TIMESTAMP_CUSTOM_DIMENSION));
 
         // See what is left over.
         assertEquals(sdkMessageMap.size(), actual.size());
@@ -314,7 +338,7 @@ public class LogParserTests {
         assertNotNull(inputStream);
 
         try (InputStreamReader inputStreamReader = new InputStreamReader(inputStream)) {
-            parser.parse(inputStreamReader, layout, false);
+            parser.parse(inputStreamReader, layout, FileFormat.PLAIN);
         }
 
         // Assert
@@ -335,6 +359,68 @@ public class LogParserTests {
         // Assert last log line after the exceptions.
         final TraceTelemetry lastActual = allValues.get(allValues.size() - 1);
         assertLogLine(last, lastActual);
+    }
+
+    /**
+     * Parses a csv log file and outputs Telemetry as expected.
+     */
+    @Test
+    public void parseCsvLogFile() throws IOException {
+        // Arrange
+        final RunInfo csvRunInfo = new RunInfo("my-run-name", false, 100L, "my-unique-id");
+        final LogParser parser = new LogParser(telemetryClient, csvRunInfo, jsonLogParserOptions);
+        final Layout layout = Layout.fromString("<timestamp>,<level>,<message>,<stack>,<logger>,<ActivityId>,<ServiceRequestId>,<thread>,<container>");
+
+        final TestLogLine first = new TestLogLine().setTimestamp("2023-03-29T18:41:02.7269636Z")
+                .setLevel(Level.DEBUG)
+                .setLogger("com.azure.messaging.servicebus.implementation.ServiceBusReactorAmqpConnection")
+                .setThread("parallel-5")
+                .setMessage("Get or create consumer.");
+        first.sdkMessageDetails.put("az.sdk.message", "Get or create consumer.");
+        first.sdkMessageDetails.put("connectionId", "MF_8a_16");
+
+        final TestLogLine second = new TestLogLine().setTimestamp("2023-03-29T18:41:03.6521692Z")
+                .setLevel(Level.INFO)
+                .setLogger("com.azure.messaging.servicebus.ServiceBusSessionManager")
+                .setThread("reactor-executor-1")
+                .setMessage("Error occurred while getting unnamed session.");
+
+        final TestLogLine third = new TestLogLine().setTimestamp("2023-03-29T18:41:02.8269636Z")
+                .setLevel(Level.WARN)
+                .setLogger("com.azure.messaging.servicebus.implementation.ServiceBusReactorAmqpConnection")
+                .setThread("parallel-4")
+                .setMessage("text message");
+
+        // Test the first few lines then the last one after the exception.
+        final List<TestLogLine> expectedLines = Arrays.asList(first, second, third);
+
+        // Act
+        InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("csv.log");
+
+        assertNotNull(inputStream);
+
+        try (InputStreamReader inputStreamReader = new InputStreamReader(inputStream)) {
+            parser.parse(inputStreamReader, layout, FileFormat.CSV);
+        }
+
+        // Assert
+        verify(telemetryClient, atLeastOnce()).trackTrace(telemetryCaptor.capture());
+        verify(telemetryClient).flush();
+
+        final List<TraceTelemetry> allValues = telemetryCaptor.getAllValues();
+
+        assertEquals(3, allValues.size());
+
+        for (int i = 0; i < 3; i++) {
+            final TestLogLine expected = expectedLines.get(i);
+            final TraceTelemetry actual = allValues.get(i);
+
+            assertLogLine(expected, actual);
+        }
+
+        TraceTelemetry actualSecond = allValues.get(1);
+        assertTrue(actualSecond.getProperties().containsKey("exception"));
+        assertEquals("110", actualSecond.getProperties().get("attempt"));
     }
 
     /**
@@ -372,8 +458,8 @@ public class LogParserTests {
 
         assertEquals(String.valueOf(lineNumber), actual.remove(TokenType.LINE.getValue()));
 
-        assertEquals(instantRepresentation, actual.remove(TokenType.TIMESTAMP.getValue()));
-        ;
+        assertEquals(instantRepresentation, actual.remove(TIMESTAMP_CUSTOM_DIMENSION));
+
         assertEquals("reactor-executor-1", actual.remove(TokenType.THREAD.getValue()));
         assertEquals("com.azure.messaging.eventhubs.PartitionPumpManager",
                 actual.remove(TokenType.LOGGER.getValue()));
@@ -431,7 +517,7 @@ public class LogParserTests {
 
         assertEquals(String.valueOf(lineNumber), actual.remove(TokenType.LINE.getValue()));
 
-        assertEquals(instantRepresentation, actual.remove(TokenType.TIMESTAMP.getValue()));
+        assertEquals(instantRepresentation, actual.remove(TIMESTAMP_CUSTOM_DIMENSION));
         assertEquals("reactor-executor-1", actual.remove(TokenType.THREAD.getValue()));
         assertEquals("com.azure.messaging.eventhubs.PartitionPumpManager",
                 actual.remove(TokenType.LOGGER.getValue()));
@@ -482,7 +568,7 @@ public class LogParserTests {
         assertNotNull(inputStream);
 
         try (InputStreamReader inputStreamReader = new InputStreamReader(inputStream)) {
-            parser.parse(inputStreamReader, Layout.DEFAULT, true);
+            parser.parse(inputStreamReader, Layout.DEFAULT, FileFormat.JSON);
         }
 
         // Assert
@@ -524,7 +610,7 @@ public class LogParserTests {
 
         assertEquals(expected.getLogger(), actual.getProperties().get(TokenType.LOGGER.getValue()));
         assertEquals(expected.getThread(), actual.getProperties().get(TokenType.THREAD.getValue()));
-        assertEquals(expected.getTimestamp(), actual.getProperties().get(TokenType.TIMESTAMP.getValue()));
+        assertEquals(expected.getTimestamp(), actual.getProperties().get(TIMESTAMP_CUSTOM_DIMENSION));
 
         expected.sdkMessageDetails.forEach((key, expectedValue) -> {
             assertTrue(actual.getProperties().containsKey(key), "Did not contain key: " + key);

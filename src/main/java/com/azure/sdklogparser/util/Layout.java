@@ -27,7 +27,13 @@ public class Layout {
         var matcher = regex.matcher(layoutStr);
 
         final List<Token> tokens = new ArrayList<>();
+        int matcherStart = 0;
+        boolean first = true;
         while (matcher.find()) {
+            if (first) {
+                matcherStart = matcher.start();
+                first = false;
+            }
             tokens.add(new Token(matcher.group(1), matcher.group(2)));
         }
 
@@ -37,14 +43,16 @@ public class Layout {
             tokens.add(new Token(TokenType.MESSAGE.getValue(), null));
         }
 
-        return new Layout(tokens);
+        return new Layout(tokens, matcherStart);
     }
 
     private final List<Token> tokens;
     private final String display;
+    private final int startIndex;
 
-    private Layout(List<Token> tokens) {
+    private Layout(List<Token> tokens, int startIndex) {
         this.tokens = Collections.unmodifiableList(tokens);
+        this.startIndex = startIndex;
 
         this.display = tokens.stream()
                 .map(t -> {
@@ -56,6 +64,10 @@ public class Layout {
 
     public List<Token> getTokens() {
         return tokens;
+    }
+
+    public int getStartIndex() {
+        return startIndex;
     }
 
     @Override

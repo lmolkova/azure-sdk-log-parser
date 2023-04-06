@@ -2,6 +2,8 @@ package com.azure.sdklogparser;
 
 import com.azure.sdklogparser.util.ArchiveHelper;
 import com.azure.sdklogparser.util.ConsoleTelemetryClient;
+import com.azure.sdklogparser.util.FileFormat;
+import com.azure.sdklogparser.util.Layout;
 import com.azure.sdklogparser.util.RunInfo;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterException;
@@ -33,10 +35,12 @@ public class LogParserApp {
         // -l "<date> <time> <level> [<thread>] <class> - "
         final PlaintextLogParserOptions plainTextCommand = new PlaintextLogParserOptions();
         final JsonLogParserOptions jsonCommand = new JsonLogParserOptions();
+        final CsvLogParserOptions csvCommand = new CsvLogParserOptions();
 
         final JCommander jCommander = JCommander.newBuilder()
                 .addCommand(PlaintextLogParserOptions.COMMAND_NAME, plainTextCommand)
                 .addCommand(JsonLogParserOptions.COMMAND_NAME, jsonCommand)
+                .addCommand(CsvLogParserOptions.COMMAND_NAME, csvCommand)
                 .build();
         jCommander.setProgramName("log-parser");
 
@@ -46,30 +50,44 @@ public class LogParserApp {
             System.err.println(e.getLocalizedMessage());
             System.err.println();
 
-            printHelp(jCommander, plainTextCommand, jsonCommand);
+            printHelp(jCommander, plainTextCommand, jsonCommand, csvCommand);
             return;
         }
 
         final String command = jCommander.getParsedCommand();
 
         final LogParserOptions optionsToUse;
+        FileFormat fileFormat = null;
+        Layout layout = null;
         if (PlaintextLogParserOptions.COMMAND_NAME.equalsIgnoreCase(command)) {
             if (plainTextCommand.isPrintHelp()) {
-                printHelp(jCommander, plainTextCommand, jsonCommand);
+                printHelp(jCommander, plainTextCommand, jsonCommand, csvCommand);
                 return;
             }
 
+            fileFormat = FileFormat.PLAIN;
             optionsToUse = plainTextCommand;
+            layout = plainTextCommand.getLayout();
         } else if (JsonLogParserOptions.COMMAND_NAME.equalsIgnoreCase(command)) {
             if (jsonCommand.isPrintHelp()) {
-                printHelp(jCommander, plainTextCommand, jsonCommand);
+                printHelp(jCommander, plainTextCommand, jsonCommand, csvCommand);
                 return;
             }
 
             optionsToUse = jsonCommand;
+            fileFormat = FileFormat.JSON;
+        } else if (CsvLogParserOptions.COMMAND_NAME.equalsIgnoreCase(command)) {
+            if (csvCommand.isPrintHelp()) {
+                printHelp(jCommander, plainTextCommand, jsonCommand, csvCommand);
+                return;
+            }
+
+            optionsToUse = csvCommand;
+            fileFormat = FileFormat.CSV;
+            layout = csvCommand.getLayout();
         } else {
             System.out.println("Arguments did not match any command sets.");
-            printHelp(jCommander, plainTextCommand, jsonCommand);
+            printHelp(jCommander, plainTextCommand, jsonCommand, csvCommand);
             return;
         }
 
@@ -78,7 +96,6 @@ public class LogParserApp {
             optionsToUse.setIsDryRun(true);
         }
 
-        final boolean isJson = optionsToUse instanceof JsonLogParserOptions;
         final RunInfo runInformation = getRunInformation(optionsToUse);
         final TelemetryClient telemetryClient = getTelemetryClient(optionsToUse, runInformation);
         final Path pathToFile = getPathAndUnzipIfNeeded(optionsToUse.getFileOrDirectory(), optionsToUse.unzipFile());
@@ -88,7 +105,7 @@ public class LogParserApp {
         for (var file : listFiles(pathToFile)) {
             runInformation.nextFile(file.getAbsolutePath());
             try (var fileReader = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
-                logParser.parse(fileReader, plainTextCommand.getLayout(), isJson);
+                logParser.parse(fileReader, layout, fileFormat);
             } catch (IOException e) {
                 throw new UncheckedIOException("Unable to read file: " + file, e);
             }
